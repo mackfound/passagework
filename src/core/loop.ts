@@ -14,6 +14,9 @@ export const RATE_STEP = 0.05;
 /** 10 ms — both the tap quantum and the keyboard nudge step. */
 export const GRID: Seconds = 0.01;
 
+/** Alt+arrow: repositioning jump, for when a boundary is bars away, not ms. */
+export const NUDGE_COARSE: Seconds = 0.5;
+
 /** Shortest legal region. Guards nudges from inverting start/end. */
 export const MIN_REGION: Seconds = 0.1;
 
@@ -62,17 +65,19 @@ export function normalizeRegion(
 }
 
 /**
- * Move one edge of a region by ±GRID. Returns the input unchanged (not null)
- * when the nudge would violate MIN_REGION or source bounds — a rejected
- * nudge should feel like hitting a wall, not destroy the region.
+ * Move one edge of a region by ±step (default one grid cell). Returns the
+ * input unchanged (not null) when the nudge would violate MIN_REGION or
+ * source bounds — a rejected nudge should feel like hitting a wall, not
+ * destroy the region.
  */
 export function nudgeRegion(
   region: Region,
   edge: "start" | "end",
   dir: 1 | -1,
   duration: Seconds | null,
+  step: Seconds = GRID,
 ): Region {
-  const delta = dir * GRID;
+  const delta = dir * step;
   const next: Region =
     edge === "start"
       ? { start: quantize(region.start + delta), end: region.end }

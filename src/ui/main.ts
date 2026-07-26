@@ -9,6 +9,8 @@ import {
   type AppState,
   type Excerpt,
   type ProjectDoc,
+  GRID,
+  NUDGE_COARSE,
   RATE_MAX,
   SEED_SOURCE_ID,
   clampRate,
@@ -101,6 +103,8 @@ function triggerExcerpt(hotkey: string): void {
 
 function selectExcerpt(exc: Excerpt): void {
   S.selectedId = exc.id;
+  S.app.selectedExcerptId = exc.id;
+  persistApp();
   S.draftStart = null;
   S.imageRole = exc.assets.some((a) => a.role === "part") ? "part" : "score";
   S.engine?.setRate(rateFor(exc));
@@ -126,7 +130,11 @@ function startLoop(exc: Excerpt): void {
   S.engine.seek(entry);
   S.engine.play();
   S.loopingId = exc.id;
-  say("");
+  say(
+    S.preRollEnabled && exc.preRoll > 0
+      ? `pre-roll ${exc.preRoll.toFixed(1)}s → loop`
+      : "looping",
+  );
   render();
 }
 
@@ -206,10 +214,10 @@ function tap(edge: "start" | "end"): void {
   render();
 }
 
-function nudge(edge: "start" | "end", dir: 1 | -1): void {
+function nudge(edge: "start" | "end", dir: 1 | -1, coarse: boolean): void {
   const exc = selected();
   if (!exc?.region) return;
-  const next = nudgeRegion(exc.region, edge, dir, S.duration);
+  const next = nudgeRegion(exc.region, edge, dir, S.duration, coarse ? NUDGE_COARSE : GRID);
   if (next === exc.region) return; // hit a wall
   exc.region = next;
   // live-update an active loop so nudges are audible immediately
@@ -456,7 +464,10 @@ function onKeydown(ev: KeyboardEvent): void {
   const hotkeys = new Set(
     S.doc.excerpts.flatMap((e) => (e.hotkey ? [e.hotkey.toLowerCase()] : [])),
   );
-  const intent = resolveIntent({ key: ev.key, shiftKey: ev.shiftKey }, hotkeys);
+  const intent = resolveIntent(
+    { key: ev.key, shiftKey: ev.shiftKey, altKey: ev.altKey },
+    hotkeys,
+  );
   if (!intent) return;
   ev.preventDefault();
   // held-key repeat is wanted for nudging/rate, wrong for everything else
@@ -467,7 +478,7 @@ function onKeydown(ev: KeyboardEvent): void {
     case "stopLoop": stopLoop(false); break;
     case "rateStep": rateStepIntent(intent.dir); break;
     case "rateReset": rateReset(); break;
-    case "nudge": nudge(intent.edge, intent.dir); break;
+    case "nudge": nudge(intent.edge, intent.dir, intent.coarse); break;
     case "tap": tap(intent.edge); break;
     case "toggleImage": toggleImage(); break;
     case "togglePreRoll": togglePreRoll(); break;
@@ -492,7 +503,10 @@ async function boot(): Promise<void> {
     engine: null,
     duration: doc.sources[0]?.duration ?? null,
     audioReady: false,
-    selectedId: doc.excerpts[0]?.id ?? null,
+    selectedId:
+      doc.excerpts.find((e) => e.id === appState.selectedExcerptId)?.id ??
+      doc.excerpts[0]?.id ??
+      null,
     loopingId: null,
     draftStart: null,
     preRollEnabled: true,
@@ -507,16 +521,38 @@ async function boot(): Promise<void> {
   overlay.append(h("div", "hint", "press any key to begin"));
   document.body.append(overlay);
 
-  const arm = () => {
-    window.removeEventListener("keydown", arm, true);
-    overlay.removeEventListener("click", arm);
+  // "Open the tool, hit one key, the passage loops" (§1): if the arming
+  // keypress is an excerpt hotkey, trigger that excerpt once audio is up.
+  const arm = (ev?: KeyboardEvent) => {
+    window.removeEventListener("keydown", arm as EventListener, true);
+    overlay.removeEventListener("click", arm as EventListener);
     overlay.remove();
     render();
-    void armAudio().then(() => render());
+    const armKey = ev instanceof KeyboardEvent ? ev.key.toLowerCase() : null;
+    void armAudio().then(() => {
+      render();
+      if (armKey && S.audioReady && S.doc.excerpts.some((e) => e.hotkey === armKey)) {
+        triggerExcerpt(armKey);
+      }
+    });
     window.addEventListener("keydown", onKeydown);
   };
-  window.addEventListener("keydown", arm, true);
-  overlay.addEventListener("click", arm);
+  window.addEventListener("keydown", arm as EventListener, true);
+  overlay.addEventListener("click", arm as EventListener);
 }
 
 void boot();
+
+// Dev-only introspection for scripted E2E checks; stripped from prod builds.
+if (import.meta.env.DEV) {
+  (window as unknown as Record<string, unknown>)["__looper"] = {
+    pos: () => S.engine?.getPosition() ?? null,
+    state: () => ({
+      selectedId: S.selectedId,
+      loopingId: S.loopingId,
+      audioReady: S.audioReady,
+      duration: S.duration,
+      paused: S.engine?.paused ?? null,
+    }),
+  };
+}

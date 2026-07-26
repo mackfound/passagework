@@ -93,6 +93,14 @@ describe("nudgeRegion", () => {
     expect(nudgeRegion({ start: 98, end: 100 }, "end", 1, 100)).toEqual({ start: 98, end: 100 });
   });
 
+  it("coarse step moves 500 ms per press", () => {
+    expect(nudgeRegion(region, "start", -1, 100, 0.5)).toEqual({ start: 9.5, end: 12.0 });
+    expect(nudgeRegion(region, "end", 1, 100, 0.5)).toEqual({ start: 10.0, end: 12.5 });
+    // coarse nudge that would cross MIN_REGION hits the wall like a fine one
+    const tight = { start: 10.0, end: 10.2 };
+    expect(nudgeRegion(tight, "start", 1, 100, 0.5)).toEqual(tight);
+  });
+
   it("repeated nudges accumulate without float drift off the grid", () => {
     let r = { start: 10.0, end: 12.0 };
     for (let i = 0; i < 100; i++) r = nudgeRegion(r, "start", 1, 100);

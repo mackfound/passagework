@@ -118,4 +118,6 @@ export interface AppState {
   activeProjectId: string | null;
   /** excerptId → last-used playback rate (sticky across reloads). */
   workingRates: Record<string, number>;
+  /** Restored on launch so "open tool, hit one key, it loops" holds (§1). */
+  selectedExcerptId?: string | null;
 }

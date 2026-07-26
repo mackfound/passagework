@@ -12,7 +12,7 @@ export type Intent =
   | { type: "stopLoop" }
   | { type: "rateStep"; dir: 1 | -1 }
   | { type: "rateReset" }
-  | { type: "nudge"; edge: "start" | "end"; dir: 1 | -1 }
+  | { type: "nudge"; edge: "start" | "end"; dir: 1 | -1; coarse: boolean }
   | { type: "tap"; edge: "start" | "end" }
   | { type: "toggleImage" }
   | { type: "togglePreRoll" }
@@ -25,14 +25,15 @@ export type Intent =
 export interface KeyStroke {
   key: string;
   shiftKey: boolean;
+  altKey: boolean;
 }
 
 type IntentRule = (k: KeyStroke) => Intent | null;
 
 /**
  * The default keymap. Arrows nudge the loop start; Shift+arrows nudge the
- * end. PageUp/PageDown alias prev/next because that's what page-turner
- * pedals emit.
+ * end; Alt turns either into a coarse 500 ms jump. PageUp/PageDown alias
+ * prev/next because that's what page-turner pedals emit.
  */
 const rules: Record<string, IntentRule> = {
   " ": () => ({ type: "togglePlay" }),
@@ -40,8 +41,8 @@ const rules: Record<string, IntentRule> = {
   "[": () => ({ type: "rateStep", dir: -1 }),
   "]": () => ({ type: "rateStep", dir: 1 }),
   "\\": () => ({ type: "rateReset" }),
-  arrowleft: (k) => ({ type: "nudge", edge: k.shiftKey ? "end" : "start", dir: -1 }),
-  arrowright: (k) => ({ type: "nudge", edge: k.shiftKey ? "end" : "start", dir: 1 }),
+  arrowleft: (k) => ({ type: "nudge", edge: k.shiftKey ? "end" : "start", dir: -1, coarse: k.altKey }),
+  arrowright: (k) => ({ type: "nudge", edge: k.shiftKey ? "end" : "start", dir: 1, coarse: k.altKey }),
   i: () => ({ type: "tap", edge: "start" }),
   o: () => ({ type: "tap", edge: "end" }),
   tab: () => ({ type: "toggleImage" }),

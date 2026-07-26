@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveIntent } from "./intents";
 
 const hotkeys = new Set(["1", "2", "3", "d"]);
-const stroke = (key: string, shiftKey = false) => ({ key, shiftKey });
+const stroke = (key: string, shiftKey = false, altKey = false) => ({ key, shiftKey, altKey });
 
 describe("resolveIntent", () => {
   it("maps fixed bindings", () => {
@@ -13,16 +13,24 @@ describe("resolveIntent", () => {
     expect(resolveIntent(stroke("\\"), hotkeys)).toEqual({ type: "rateReset" });
   });
 
-  it("shift routes arrow nudges to the end edge", () => {
+  it("shift routes arrow nudges to the end edge; alt makes them coarse", () => {
     expect(resolveIntent(stroke("ArrowLeft"), hotkeys)).toEqual({
       type: "nudge",
       edge: "start",
       dir: -1,
+      coarse: false,
     });
     expect(resolveIntent(stroke("ArrowRight", true), hotkeys)).toEqual({
       type: "nudge",
       edge: "end",
       dir: 1,
+      coarse: false,
+    });
+    expect(resolveIntent(stroke("ArrowRight", true, true), hotkeys)).toEqual({
+      type: "nudge",
+      edge: "end",
+      dir: 1,
+      coarse: true,
     });
   });
 
