@@ -1,0 +1,24 @@
+# Audio files — never committed. See spec §11.
+# Config JSON *is* committed; the audio it references is not.
+*.wav
+*.aif
+*.aiff
+*.flac
+*.mp3
+*.m4a
+*.aac
+*.ogg
+*.opus
+
+# Score images the user supplies locally (inline base64 assets live in the JSON instead)
+/audio/
+/scores/
+
+# Build spec / working brief — kept out of the repo deliberately
+README_excerpt_looper.md
+
+# Tooling
+node_modules/
+dist/
+.DS_Store
+.claude/settings.local.json
