@@ -22,3 +22,7 @@ export function parseProjectJson(json: string): ProjectDoc {
 export function serializeProject(doc: ProjectDoc): string {
   return JSON.stringify(doc, null, 2) + "\n";
 }
+
+export * from "./projects";
+export * from "./files";
+export * from "./images";

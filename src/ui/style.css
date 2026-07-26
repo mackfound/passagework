@@ -1,0 +1,272 @@
+/*
+ * Spec §8: sparse, high-contrast, read from three feet away while holding
+ * an instrument. The score image dominates; everything else is chrome.
+ * Dark background — this sits next to a music stand under a lamp.
+ */
+
+:root {
+  color-scheme: dark;
+  --bg: #0e0e12;
+  --panel: #17171d;
+  --fg: #ececf1;
+  --dim: #9a9aa6;
+  --accent: #ffb454;
+  --loop: #4ade80;
+  --warn: #f87171;
+  --focus: #60a5fa;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, sans-serif;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Visible focus rings are load-bearing (§8) */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ---- status bar ---- */
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.6rem 1.2rem;
+  background: var(--panel);
+  font-size: 1.05rem;
+  flex: none;
+}
+
+.status .project {
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Rate: a visible number, always (§8) — biggest thing in the bar */
+.status .rate {
+  font-size: 1.9rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  min-width: 5.5ch;
+  text-align: right;
+}
+
+.status .pos {
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+  min-width: 16ch;
+}
+
+.badge {
+  padding: 0.15rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  border: 1px solid var(--dim);
+  color: var(--dim);
+}
+
+.badge.on {
+  border-color: var(--loop);
+  color: var(--loop);
+}
+
+.status .msg {
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: 600;
+  text-align: right;
+}
+
+.status .msg.error {
+  color: var(--warn);
+}
+
+/* ---- score stage ---- */
+
+.stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem;
+}
+
+.stage img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  /* score scans are near-white; keep them readable but not blinding */
+  filter: brightness(0.92);
+}
+
+.stage .placeholder {
+  color: var(--dim);
+  font-size: 1.3rem;
+  text-align: center;
+  line-height: 2;
+}
+
+/* ---- region strip: loop position at a glance from across the room ---- */
+
+.regionbar {
+  flex: none;
+  height: 10px;
+  margin: 0 1.2rem;
+  background: var(--panel);
+  border-radius: 5px;
+  position: relative;
+  overflow: hidden;
+}
+
+.regionbar .fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: var(--loop);
+  border-radius: 5px;
+}
+
+.regionbar.preroll .fill {
+  background: var(--accent);
+}
+
+/* ---- excerpt row ---- */
+
+.excerpts {
+  flex: none;
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.9rem 1.2rem 1.1rem;
+  overflow-x: auto;
+}
+
+.excerpt {
+  background: var(--panel);
+  border: 2px solid transparent;
+  border-radius: 10px;
+  color: var(--fg);
+  padding: 0.7rem 1rem;
+  min-width: 11rem;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  flex: none;
+}
+
+.excerpt.selected {
+  border-color: var(--accent);
+}
+
+.excerpt.looping {
+  border-color: var(--loop);
+  box-shadow: 0 0 12px rgb(74 222 128 / 35%);
+}
+
+.excerpt .key {
+  display: inline-block;
+  background: var(--bg);
+  border: 1px solid var(--dim);
+  border-radius: 5px;
+  padding: 0.05rem 0.55rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin-right: 0.5rem;
+}
+
+.excerpt .short {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.excerpt .detail {
+  margin-top: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--dim);
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.excerpt .untimed {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.excerpt .attach {
+  margin-top: 0.45rem;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.excerpt .attach button {
+  font: inherit;
+  font-size: 0.8rem;
+  background: var(--bg);
+  color: var(--dim);
+  border: 1px solid var(--dim);
+  border-radius: 5px;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+}
+
+.excerpt .attach button:hover {
+  color: var(--fg);
+}
+
+/* asset mode badge: inline vs handle must be visible, not silent */
+.assetmode {
+  font-size: 0.7rem;
+  border: 1px solid var(--dim);
+  border-radius: 3px;
+  padding: 0 0.3rem;
+  color: var(--dim);
+}
+
+/* ---- arm overlay: one gesture arms audio + file permission (§11) ---- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  z-index: 10;
+  font-size: 1.6rem;
+}
+
+.overlay .hint {
+  color: var(--dim);
+  font-size: 1rem;
+}
