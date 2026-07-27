@@ -23,6 +23,7 @@ import {
 } from "../core";
 import { MediaElementEngine } from "../audio/MediaElementEngine";
 import {
+  linkFromDataTransfer,
   loadOrSeedProject,
   loadAppState,
   pickAudioFile,
@@ -32,6 +33,7 @@ import {
   saveAppState,
   saveProject,
 } from "../storage";
+import type { FileRef } from "../core";
 import "./style.css";
 
 const AUDIO_HANDLE_KEY = "handle_main";
@@ -51,6 +53,7 @@ interface UiState {
   imageRole: "part" | "score";
   message: string;
   messageIsError: boolean;
+  linkModal: { open: boolean; hint: string };
 }
 
 let S: UiState;
@@ -250,16 +253,50 @@ function stepSelection(dir: 1 | -1): void {
   if (next.region) startLoop(next); // pedal flow: next excerpt starts looping
 }
 
-async function linkAudio(): Promise<void> {
-  const picked = await pickAudioFile(AUDIO_HANDLE_KEY);
-  if (!picked) return;
+function openLinkModal(hint: string): void {
+  S.linkModal = { open: true, hint };
+  render();
+}
+
+function closeLinkModal(): void {
+  S.linkModal.open = false;
+  render();
+}
+
+async function completeLink(
+  picked: { file: File; ref: FileRef },
+  persistent: boolean,
+): Promise<void> {
   const source = S.doc.sources.find((s) => s.id === SEED_SOURCE_ID) ?? S.doc.sources[0];
   if (!source) return;
   source.fileRef = picked.ref;
   await loadIntoEngine(picked.file, source.id);
   persistDoc();
-  say(`linked: ${picked.file.name}`);
+  S.linkModal.open = false;
+  say(
+    persistent
+      ? `linked: ${picked.file.name}`
+      : `linked for this session: ${picked.file.name} — re-link after a restart`,
+    !persistent,
+  );
   render();
+}
+
+async function browseForAudio(): Promise<void> {
+  const picked = await pickAudioFile(AUDIO_HANDLE_KEY);
+  if (!picked) return;
+  await completeLink(picked, true);
+}
+
+async function dropAudio(dt: DataTransfer): Promise<void> {
+  const result = await linkFromDataTransfer(dt, AUDIO_HANDLE_KEY);
+  if (!result) return;
+  if ("error" in result) {
+    S.linkModal.hint = result.error;
+    render();
+    return;
+  }
+  await completeLink(result, result.persistent);
 }
 
 // ---------- audio boot ----------
@@ -296,6 +333,7 @@ async function armAudio(): Promise<void> {
       "file-missing": "the recording moved or was deleted",
     }[resolved.reason];
     say(`${why} — press L to link it`, true);
+    openLinkModal(why);
   }
 }
 
@@ -391,6 +429,46 @@ function render(): void {
     row.append(card);
   }
   app.append(row);
+
+  if (S.linkModal.open) renderLinkModal();
+}
+
+function renderLinkModal(): void {
+  const backdrop = h("div", "modal-backdrop");
+  const modal = h("div", "modal");
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-label", "Link audio file");
+
+  modal.append(h("div", "modal-title", "Link recording"));
+  modal.append(h("div", "modal-hint", S.linkModal.hint));
+
+  const zone = h("div", "dropzone");
+  zone.append(h("div", "dropzone-big", "drop an audio file here"));
+  zone.append(h("div", "dropzone-small", "or press Enter to browse — Esc to cancel"));
+  zone.addEventListener("dragover", (ev) => {
+    ev.preventDefault();
+    zone.classList.add("over");
+  });
+  zone.addEventListener("dragleave", () => zone.classList.remove("over"));
+  zone.addEventListener("drop", (ev) => {
+    ev.preventDefault();
+    zone.classList.remove("over");
+    if (ev.dataTransfer) void dropAudio(ev.dataTransfer);
+  });
+  modal.append(zone);
+
+  const browse = h("button", "browse", "browse files");
+  browse.type = "button";
+  browse.addEventListener("click", () => void browseForAudio());
+  modal.append(browse);
+
+  // clicking the backdrop (not the modal) cancels — mouse parity with Esc
+  backdrop.addEventListener("click", (ev) => {
+    if (ev.target === backdrop) closeLinkModal();
+  });
+
+  backdrop.append(modal);
+  app.append(backdrop);
 }
 
 function renderStatus(): void {
@@ -461,6 +539,17 @@ function onTick(pos: number): void {
 // ---------- input ----------
 
 function onKeydown(ev: KeyboardEvent): void {
+  // The link modal owns the keyboard while open: Enter/B browse, Esc/L
+  // close. Everything else is swallowed so Space can't start playback
+  // underneath a dialog.
+  if (S.linkModal.open) {
+    ev.preventDefault();
+    if (ev.repeat) return;
+    const k = ev.key.toLowerCase();
+    if (k === "enter" || k === "b") void browseForAudio();
+    else if (k === "escape" || k === "l") closeLinkModal();
+    return;
+  }
   const hotkeys = new Set(
     S.doc.excerpts.flatMap((e) => (e.hotkey ? [e.hotkey.toLowerCase()] : [])),
   );
@@ -485,7 +574,9 @@ function onKeydown(ev: KeyboardEvent): void {
     case "triggerExcerpt": triggerExcerpt(intent.hotkey); break;
     case "prevExcerpt": stepSelection(-1); break;
     case "nextExcerpt": stepSelection(1); break;
-    case "linkAudio": void linkAudio(); break;
+    case "linkAudio":
+      openLinkModal(S.audioReady ? "replace the current recording" : "link the recording");
+      break;
   }
 }
 
@@ -513,7 +604,13 @@ async function boot(): Promise<void> {
     imageRole: "part",
     message: "",
     messageIsError: false,
+    linkModal: { open: false, hint: "" },
   };
+
+  // A drop that misses the dropzone must not navigate the page away from
+  // the app (the browser's default is to open the file).
+  window.addEventListener("dragover", (ev) => ev.preventDefault());
+  window.addEventListener("drop", (ev) => ev.preventDefault());
 
   // One gesture arms everything: AudioContext + file permission (§11).
   const overlay = h("div", "overlay");

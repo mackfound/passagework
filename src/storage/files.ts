@@ -37,6 +37,46 @@ export async function resolveAudio(ref: FileRef): Promise<ResolvedAudio> {
   }
 }
 
+export const AUDIO_EXTENSIONS = [".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus"];
+
+export function looksLikeAudio(file: File): boolean {
+  if (file.type.startsWith("audio/")) return true;
+  const name = file.name.toLowerCase();
+  return AUDIO_EXTENSIONS.some((ext) => name.endsWith(ext));
+}
+
+/**
+ * Resolve a drag-and-drop payload to a linked audio file.
+ * Prefers a persistable handle (getAsFileSystemHandle, Chromium); falls back
+ * to the session-only File with a `filename` ref — playable now, but needing
+ * re-selection after a restart. Callers surface that difference honestly.
+ */
+export async function linkFromDataTransfer(
+  dt: DataTransfer,
+  handleKey: string,
+): Promise<{ file: File; ref: FileRef; persistent: boolean } | { error: string } | null> {
+  const item = Array.from(dt.items).find((i) => i.kind === "file");
+  if (!item) return null;
+  if (typeof item.getAsFileSystemHandle === "function") {
+    try {
+      const handle = await item.getAsFileSystemHandle();
+      if (handle && handle.kind === "file") {
+        const fileHandle = handle as FileSystemFileHandle;
+        const file = await fileHandle.getFile();
+        if (!looksLikeAudio(file)) return { error: `"${file.name}" doesn't look like an audio file` };
+        await saveHandle(handleKey, fileHandle);
+        return { file, ref: { kind: "fsHandle", key: handleKey }, persistent: true };
+      }
+    } catch {
+      /* fall through to the session-only path */
+    }
+  }
+  const file = item.getAsFile();
+  if (!file) return null;
+  if (!looksLikeAudio(file)) return { error: `"${file.name}" doesn't look like an audio file` };
+  return { file, ref: { kind: "filename", name: file.name }, persistent: false };
+}
+
 /**
  * Show the audio file picker and persist the chosen handle.
  * Returns null if the user cancelled. Requires a user gesture.

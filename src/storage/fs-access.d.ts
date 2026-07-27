@@ -22,3 +22,8 @@ interface FileSystemHandle {
   queryPermission(descriptor?: { mode: "read" | "readwrite" }): Promise<PermissionState>;
   requestPermission(descriptor?: { mode: "read" | "readwrite" }): Promise<PermissionState>;
 }
+
+interface DataTransferItem {
+  /** Chromium: yields a persistable handle from a drag-and-drop item. */
+  getAsFileSystemHandle(): Promise<FileSystemHandle | null>;
+}
