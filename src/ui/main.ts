@@ -23,6 +23,7 @@ import {
 } from "../core";
 import { MediaElementEngine } from "../audio/MediaElementEngine";
 import {
+  imageFromDataTransfer,
   linkFromDataTransfer,
   loadOrSeedProject,
   loadAppState,
@@ -33,6 +34,7 @@ import {
   saveAppState,
   saveProject,
 } from "../storage";
+import type { AssetData } from "../core";
 import type { FileRef } from "../core";
 import "./style.css";
 
@@ -53,8 +55,13 @@ interface UiState {
   imageRole: "part" | "score";
   message: string;
   messageIsError: boolean;
-  linkModal: { open: boolean; hint: string };
+  linkModal: { open: boolean; hint: string; target: LinkTarget };
 }
+
+/** What the link modal is linking: the recording, or one excerpt's image slot. */
+type LinkTarget =
+  | { kind: "audio" }
+  | { kind: "image"; excerptId: string; role: "part" | "score" };
 
 let S: UiState;
 
@@ -253,8 +260,8 @@ function stepSelection(dir: 1 | -1): void {
   if (next.region) startLoop(next); // pedal flow: next excerpt starts looping
 }
 
-function openLinkModal(hint: string): void {
-  S.linkModal = { open: true, hint };
+function openLinkModal(hint: string, target: LinkTarget = { kind: "audio" }): void {
+  S.linkModal = { open: true, hint, target };
   render();
 }
 
@@ -297,6 +304,53 @@ async function dropAudio(dt: DataTransfer): Promise<void> {
     return;
   }
   await completeLink(result, result.persistent);
+}
+
+// ---------- image linking (same modal, image target) ----------
+
+function imageAssetId(excerptId: string, role: "part" | "score"): string {
+  return `img_${excerptId}_${role}`;
+}
+
+function applyImageAsset(excerptId: string, role: "part" | "score", data: AssetData): void {
+  const exc = S.doc.excerpts.find((e) => e.id === excerptId);
+  if (!exc) return;
+  const assetId = imageAssetId(excerptId, role);
+  S.doc.assets[assetId] = data;
+  const existing = exc.assets.find((a) => a.role === role);
+  if (existing) existing.ref = assetId;
+  else exc.assets.push({ type: "image", role, ref: assetId });
+  persistDoc();
+  S.imageRole = role;
+  S.linkModal.open = false;
+  // asset mode must be visible, not silent (§5)
+  say(`${role} image attached (${data.kind === "inline" ? "inline" : "file-backed"})`);
+  render();
+  void renderImage();
+}
+
+async function browseForImage(excerptId: string, role: "part" | "score"): Promise<void> {
+  const data = await pickImage(imageAssetId(excerptId, role));
+  if (!data) return;
+  applyImageAsset(excerptId, role, data);
+}
+
+async function dropImage(dt: DataTransfer, excerptId: string, role: "part" | "score"): Promise<void> {
+  const result = await imageFromDataTransfer(dt, imageAssetId(excerptId, role));
+  if (!result) return;
+  if ("error" in result) {
+    S.linkModal.hint = result.error;
+    render();
+    return;
+  }
+  applyImageAsset(excerptId, role, result.data);
+}
+
+/** Modal Enter/B and the browse button route here; the drop handler routes to drop*. */
+function browseForTarget(): void {
+  const t = S.linkModal.target;
+  if (t.kind === "audio") void browseForAudio();
+  else void browseForImage(t.excerptId, t.role);
 }
 
 // ---------- audio boot ----------
@@ -416,7 +470,7 @@ function render(): void {
         btn.type = "button";
         btn.addEventListener("click", (ev) => {
           ev.stopPropagation();
-          void attachImage(e, role);
+          attachImage(e, role);
         });
         attach.append(btn);
       }
@@ -434,17 +488,27 @@ function render(): void {
 }
 
 function renderLinkModal(): void {
+  const target = S.linkModal.target;
+  const isAudio = target.kind === "audio";
   const backdrop = h("div", "modal-backdrop");
   const modal = h("div", "modal");
   modal.setAttribute("role", "dialog");
-  modal.setAttribute("aria-label", "Link audio file");
+  modal.setAttribute("aria-label", isAudio ? "Link audio file" : `Attach ${target.kind === "image" ? target.role : ""} image`);
 
-  modal.append(h("div", "modal-title", "Link recording"));
+  modal.append(h("div", "modal-title", isAudio ? "Link recording" : `${target.role === "part" ? "Part" : "Score"} image`));
   modal.append(h("div", "modal-hint", S.linkModal.hint));
 
   const zone = h("div", "dropzone");
-  zone.append(h("div", "dropzone-big", "drop an audio file here"));
-  zone.append(h("div", "dropzone-small", "or press Enter to browse — Esc to cancel"));
+  zone.append(h("div", "dropzone-big", isAudio ? "drop an audio file here" : "drop an image here"));
+  zone.append(
+    h(
+      "div",
+      "dropzone-small",
+      isAudio
+        ? "or press Enter to browse — Esc to cancel"
+        : "PNG, JPG, WebP — or press Enter to browse — Esc to cancel",
+    ),
+  );
   zone.addEventListener("dragover", (ev) => {
     ev.preventDefault();
     zone.classList.add("over");
@@ -453,13 +517,15 @@ function renderLinkModal(): void {
   zone.addEventListener("drop", (ev) => {
     ev.preventDefault();
     zone.classList.remove("over");
-    if (ev.dataTransfer) void dropAudio(ev.dataTransfer);
+    if (!ev.dataTransfer) return;
+    if (target.kind === "audio") void dropAudio(ev.dataTransfer);
+    else void dropImage(ev.dataTransfer, target.excerptId, target.role);
   });
   modal.append(zone);
 
   const browse = h("button", "browse", "browse files");
   browse.type = "button";
-  browse.addEventListener("click", () => void browseForAudio());
+  browse.addEventListener("click", () => browseForTarget());
   modal.append(browse);
 
   // clicking the backdrop (not the modal) cancels — mouse parity with Esc
@@ -507,18 +573,12 @@ async function renderImage(): Promise<void> {
   stage.append(img);
 }
 
-async function attachImage(exc: Excerpt, role: "part" | "score"): Promise<void> {
-  const assetId = `img_${exc.id}_${role}`;
-  const data = await pickImage(assetId);
-  if (!data) return;
-  S.doc.assets[assetId] = data;
-  const existing = exc.assets.find((a) => a.role === role);
-  if (existing) existing.ref = assetId;
-  else exc.assets.push({ type: "image", role, ref: assetId });
-  persistDoc();
-  S.imageRole = role;
-  render();
-  void renderImage();
+function attachImage(exc: Excerpt, role: "part" | "score"): void {
+  const replacing = exc.assets.some((a) => a.role === role);
+  openLinkModal(
+    `${replacing ? "replace the" : "attach a"} ${role} image for "${exc.shortLabel ?? exc.label}"`,
+    { kind: "image", excerptId: exc.id, role },
+  );
 }
 
 function onTick(pos: number): void {
@@ -546,7 +606,7 @@ function onKeydown(ev: KeyboardEvent): void {
     ev.preventDefault();
     if (ev.repeat) return;
     const k = ev.key.toLowerCase();
-    if (k === "enter" || k === "b") void browseForAudio();
+    if (k === "enter" || k === "b") browseForTarget();
     else if (k === "escape" || k === "l") closeLinkModal();
     return;
   }
@@ -604,7 +664,7 @@ async function boot(): Promise<void> {
     imageRole: "part",
     message: "",
     messageIsError: false,
-    linkModal: { open: false, hint: "" },
+    linkModal: { open: false, hint: "", target: { kind: "audio" } },
   };
 
   // A drop that misses the dropzone must not navigate the page away from

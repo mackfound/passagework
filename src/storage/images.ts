@@ -23,9 +23,38 @@ async function fileToBase64(file: File): Promise<string> {
   return btoa(bin);
 }
 
+export const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"];
+
+export function looksLikeImage(file: File): boolean {
+  if (file.type.startsWith("image/")) return true;
+  const name = file.name.toLowerCase();
+  return IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext));
+}
+
 /**
- * Pick an image and convert it to AssetData. Inline under the threshold;
- * above it, persist the picker handle. Returns null on cancel.
+ * The inline-vs-handle decision (spec §5), shared by picker and drop paths:
+ * inline under the threshold, persist the handle above it. A large file
+ * with no handle can't persist at all — that's an error, not a silent
+ * session-only asset (unlike audio, images have no re-link-on-boot flow).
+ */
+async function assetFromImageFile(
+  file: File,
+  handle: FileSystemFileHandle | null,
+  assetKey: string,
+): Promise<AssetData | { error: string }> {
+  if (file.size <= INLINE_THRESHOLD_BYTES) {
+    return { kind: "inline", mime: file.type || "image/png", data: await fileToBase64(file) };
+  }
+  if (!handle) {
+    const mb = (INLINE_THRESHOLD_BYTES / 1024 / 1024).toFixed(0);
+    return { error: `"${file.name}" is over ${mb} MB and can't be embedded — use browse instead` };
+  }
+  await idbPut(STORES.handles, assetKey, handle);
+  return { kind: "fsHandle", key: assetKey };
+}
+
+/**
+ * Pick an image and convert it to AssetData. Returns null on cancel.
  */
 export async function pickImage(assetKey: string): Promise<AssetData | null> {
   let handle: FileSystemFileHandle;
@@ -40,11 +69,40 @@ export async function pickImage(assetKey: string): Promise<AssetData | null> {
     return null;
   }
   const file = await handle.getFile();
-  if (file.size <= INLINE_THRESHOLD_BYTES) {
-    return { kind: "inline", mime: file.type || "image/png", data: await fileToBase64(file) };
+  const data = await assetFromImageFile(file, handle, assetKey);
+  return "error" in data ? null : data;
+}
+
+/**
+ * Resolve a drag-and-drop payload to an image asset. Mirrors
+ * linkFromDataTransfer in files.ts: prefers a persistable handle
+ * (getAsFileSystemHandle, Chromium), falls back to the bare File — which
+ * still persists fine when it inlines under the threshold.
+ */
+export async function imageFromDataTransfer(
+  dt: DataTransfer,
+  assetKey: string,
+): Promise<{ data: AssetData; name: string } | { error: string } | null> {
+  const item = Array.from(dt.items).find((i) => i.kind === "file");
+  if (!item) return null;
+  let handle: FileSystemFileHandle | null = null;
+  let file: File | null = null;
+  if (typeof item.getAsFileSystemHandle === "function") {
+    try {
+      const h = await item.getAsFileSystemHandle();
+      if (h && h.kind === "file") {
+        handle = h as FileSystemFileHandle;
+        file = await handle.getFile();
+      }
+    } catch {
+      /* fall through to the bare-File path */
+    }
   }
-  await idbPut(STORES.handles, assetKey, handle);
-  return { kind: "fsHandle", key: assetKey };
+  file ??= item.getAsFile();
+  if (!file) return null;
+  if (!looksLikeImage(file)) return { error: `"${file.name}" doesn't look like an image` };
+  const data = await assetFromImageFile(file, handle, assetKey);
+  return "error" in data ? data : { data, name: file.name };
 }
 
 /**
