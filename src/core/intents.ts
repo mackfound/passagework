@@ -53,6 +53,15 @@ const rules: Record<string, IntentRule> = {
 };
 
 /**
+ * True for keys the fixed keymap owns. An excerpt hotkey bound to one of
+ * these would be silently shadowed (fixed bindings win in resolveIntent),
+ * so editors should refuse them up front.
+ */
+export function isReservedKey(key: string): boolean {
+  return key.toLowerCase() in rules;
+}
+
+/**
  * Resolve a keystroke against the fixed keymap and the project's excerpt
  * hotkeys. Excerpt hotkeys lose to fixed bindings — binding an excerpt to
  * Space would otherwise shadow play/pause silently.

@@ -10,9 +10,52 @@ import {
   makeSeedProject,
   migrate,
 } from "../core";
-import { STORES, idbGet, idbPut } from "./db";
+import { STORES, idbDelete, idbGet, idbGetAll, idbPut } from "./db";
 
 const APP_STATE_KEY = "app";
+
+export interface ProjectListing {
+  id: string;
+  name: string;
+  excerptCount: number;
+}
+
+/**
+ * List all stored projects. Raw docs are read without migrating — id/name/
+ * excerpts can never change meaning across versions (spec §4), and a listing
+ * must not fail just because one old doc would.
+ */
+export async function listProjects(): Promise<ProjectListing[]> {
+  const docs = await idbGetAll<RawDoc>(STORES.projects);
+  return docs.map((d) => ({
+    id: String(d["id"]),
+    name: typeof d["name"] === "string" ? d["name"] : "untitled",
+    excerptCount: Array.isArray(d["excerpts"]) ? d["excerpts"].length : 0,
+  }));
+}
+
+export async function loadProject(id: string): Promise<ProjectDoc | null> {
+  const raw = await idbGet<RawDoc>(STORES.projects, id);
+  return raw ? (migrate(raw) as unknown as ProjectDoc) : null;
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  await idbDelete(STORES.projects, id);
+}
+
+/** Pick a .json file and return its text. Null on cancel. */
+export async function pickJsonText(): Promise<string | null> {
+  let handle: FileSystemFileHandle;
+  try {
+    [handle] = (await window.showOpenFilePicker({
+      types: [{ description: "Project JSON", accept: { "application/json": [".json"] } }],
+      multiple: false,
+    })) as [FileSystemFileHandle];
+  } catch {
+    return null; // user cancelled
+  }
+  return (await handle.getFile()).text();
+}
 
 export async function loadOrSeedProject(): Promise<ProjectDoc> {
   const state = await loadAppState();

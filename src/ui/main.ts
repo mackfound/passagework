@@ -15,6 +15,11 @@ import {
   RATE_MAX,
   clampRate,
   entryPosition,
+  isReservedKey,
+  makeEmptyProject,
+  makeExcerpt,
+  makePlaceholderSource,
+  nextFreeHotkey,
   normalizeRegion,
   nudgeRegion,
   quantize,
@@ -23,18 +28,25 @@ import {
 } from "../core";
 import { MediaElementEngine } from "../audio/MediaElementEngine";
 import {
+  type ProjectListing,
   audioFromDataTransfer,
   deleteHandle,
+  deleteProject,
   imageFromDataTransfer,
+  listProjects,
   loadOrSeedProject,
   loadAppState,
+  loadProject,
+  parseProjectJson,
   pickAudio,
   pickImage,
+  pickJsonText,
   resolveAssetUrl,
   resolveAudio,
   saveAppState,
   saveHandle,
   saveProject,
+  serializeProject,
 } from "../storage";
 import type { AssetData } from "../core";
 import "./style.css";
@@ -63,6 +75,14 @@ interface UiState {
   message: string;
   messageIsError: boolean;
   linkModal: { open: boolean; hint: string; target: LinkTarget };
+  /** Project library dialog (M2): switch/create/import/export/delete. */
+  libraryOpen: boolean;
+  projectList: ProjectListing[];
+  /** Excerpt editor dialog (M2): excerptId null = creating a new excerpt. */
+  editor: { open: boolean; excerptId: string | null };
+  /** Click-twice confirmations for the two destructive buttons. */
+  confirmProjectDelete: boolean;
+  confirmExcerptDelete: boolean;
 }
 
 /** What the link modal is linking: one excerpt's recording, or its image slot. */
@@ -78,6 +98,23 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null;
 function persistDoc(): void {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => void saveProject(S.doc), 300);
+}
+
+/** Write S.doc now — required before switching away from it or exporting. */
+async function flushDoc(): Promise<void> {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  await saveProject(S.doc);
+}
+
+/** Cancel a pending write without saving — used after deleting the active doc. */
+function cancelPendingDocSave(): void {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
 }
 
 function persistApp(): void {
@@ -97,6 +134,26 @@ function sourceOf(exc: Excerpt): Source | null {
 /** The seed placeholder source has a filename ref with an empty name. */
 function isLinked(source: Source | null): boolean {
   return !!source && (source.fileRef.kind === "fsHandle" || source.fileRef.name !== "");
+}
+
+/** Drop sources no excerpt points at, and their stored handles. */
+function pruneOrphanSources(): void {
+  const used = new Set(S.doc.excerpts.map((e) => e.sourceId));
+  for (const s of S.doc.sources) {
+    if (!used.has(s.id) && s.fileRef.kind === "fsHandle") void deleteHandle(s.fileRef.key);
+  }
+  S.doc.sources = S.doc.sources.filter((s) => used.has(s.id));
+}
+
+/** Drop assets no excerpt references, and their stored handles. */
+function pruneOrphanAssets(): void {
+  const used = new Set(S.doc.excerpts.flatMap((e) => e.assets.map((a) => a.ref)));
+  for (const [key, data] of Object.entries(S.doc.assets)) {
+    if (!used.has(key)) {
+      if (data.kind === "fsHandle") void deleteHandle(data.key);
+      delete S.doc.assets[key];
+    }
+  }
 }
 
 function rateFor(exc: Excerpt): number {
@@ -368,13 +425,7 @@ async function completeLink(
     source.fileRef = { kind: "filename", name: file.name };
   }
   const persistent = source.fileRef.kind === "fsHandle";
-
-  // prune sources no excerpt points at any more (and their stored handles)
-  const used = new Set(S.doc.excerpts.map((e) => e.sourceId));
-  for (const s of S.doc.sources) {
-    if (!used.has(s.id) && s.fileRef.kind === "fsHandle") void deleteHandle(s.fileRef.key);
-  }
-  S.doc.sources = S.doc.sources.filter((s) => used.has(s.id));
+  pruneOrphanSources();
 
   S.files.set(source.id, file);
   await loadIntoEngine(file, source.id);
@@ -458,6 +509,198 @@ function browseForTarget(): void {
   else void browseForImage(t.excerptId, t.role);
 }
 
+// ---------- project library (M2) ----------
+
+function openLibrary(): void {
+  S.libraryOpen = true;
+  S.confirmProjectDelete = false;
+  render();
+  void listProjects().then((list) => {
+    S.projectList = list;
+    if (S.libraryOpen) render();
+  });
+}
+
+function closeDialogs(): void {
+  S.libraryOpen = false;
+  S.editor.open = false;
+  render();
+}
+
+/** Point the UI at a different doc. Pure state reset — callers handle IO. */
+function adoptDoc(doc: ProjectDoc): void {
+  S.doc = doc;
+  S.selectedId = doc.excerpts[0]?.id ?? null;
+  S.loopingId = null;
+  S.loadedSourceId = null;
+  S.duration = null;
+  S.draftStart = null;
+  S.imageRole = "part";
+  S.engine?.setLoop(null);
+  S.engine?.pause();
+  S.app.activeProjectId = doc.id;
+  S.app.selectedExcerptId = S.selectedId;
+  persistApp();
+  S.libraryOpen = false;
+  render();
+  void renderImage();
+}
+
+async function switchProject(id: string): Promise<void> {
+  await flushDoc();
+  const doc = await loadProject(id);
+  if (!doc) {
+    say("that project could not be loaded", true);
+    return;
+  }
+  adoptDoc(doc);
+  say(`switched to "${doc.name}"`);
+}
+
+async function createProject(name: string): Promise<void> {
+  const doc = makeEmptyProject(name.trim() || "Untitled");
+  await flushDoc(); // save the outgoing project before moving on
+  await saveProject(doc);
+  adoptDoc(doc);
+  say(`created "${doc.name}" — add an excerpt below to get started`);
+}
+
+function exportProjectFlow(): void {
+  const json = serializeProject(S.doc);
+  void flushDoc(); // exported file and IndexedDB should agree
+  const name = `${S.doc.name.replace(/[^\w\- ]+/g, "").trim() || "project"}.json`;
+  const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+  say(`exported ${name}`);
+}
+
+async function importProjectFlow(): Promise<void> {
+  const text = await pickJsonText();
+  if (text === null) return;
+  let doc: ProjectDoc;
+  try {
+    doc = parseProjectJson(text);
+  } catch (err) {
+    say(`import failed: ${err instanceof Error ? err.message : String(err)}`, true);
+    return;
+  }
+  // Same id = restoring a backup of an existing project: replace it. A
+  // fresh id imports alongside. Never invent a new id — re-imports of the
+  // same backup must not multiply.
+  const replacing =
+    doc.id === S.doc.id || S.projectList.some((p) => p.id === doc.id);
+  if (doc.id === S.doc.id) cancelPendingDocSave(); // don't clobber the import with the old doc
+  else await flushDoc();
+  await saveProject(doc);
+  adoptDoc(doc);
+  say(
+    `imported "${doc.name}" (${doc.excerpts.length} excerpt${doc.excerpts.length === 1 ? "" : "s"})${replacing ? " — replaced the stored copy" : ""}`,
+  );
+}
+
+async function deleteActiveProject(): Promise<void> {
+  // this project's stored handles go with it
+  for (const s of S.doc.sources) {
+    if (s.fileRef.kind === "fsHandle") void deleteHandle(s.fileRef.key);
+  }
+  for (const data of Object.values(S.doc.assets)) {
+    if (data.kind === "fsHandle") void deleteHandle(data.key);
+  }
+  const deadId = S.doc.id;
+  const deadName = S.doc.name;
+  cancelPendingDocSave(); // a queued write would resurrect it
+  await deleteProject(deadId);
+  const remaining = (await listProjects()).filter((p) => p.id !== deadId);
+  const nextId = remaining[0]?.id;
+  const next = nextId ? await loadProject(nextId) : null;
+  if (next) {
+    adoptDoc(next);
+  } else {
+    // nothing left: reseed rather than strand the UI without a doc
+    await saveAppState({ ...S.app, activeProjectId: null });
+    adoptDoc(await loadOrSeedProject());
+  }
+  say(`deleted "${deadName}"`);
+}
+
+// ---------- excerpt editor (M2) ----------
+
+function openEditor(excerptId: string | null): void {
+  S.editor = { open: true, excerptId };
+  S.confirmExcerptDelete = false;
+  render();
+}
+
+/**
+ * Validate + apply the editor form. Returns an error string instead of
+ * applying when the input is bad — the caller shows it without re-rendering
+ * (a render would wipe the form the user is still fixing).
+ */
+function saveExcerptFields(rawLabel: string, rawShort: string, rawHotkey: string): string | null {
+  const label = rawLabel.trim();
+  const shortLabel = rawShort.trim();
+  const hotkey = rawHotkey.trim().toLowerCase();
+  if (!label) return "label is required";
+  if (hotkey.length > 1) return "hotkey must be a single key";
+  if (hotkey && isReservedKey(hotkey)) return `"${hotkey}" is reserved by the app keymap`;
+  const clash = S.doc.excerpts.find((e) => e.hotkey === hotkey && e.id !== S.editor.excerptId);
+  if (hotkey && clash) return `"${hotkey}" is already used by "${clash.shortLabel ?? clash.label}"`;
+
+  if (S.editor.excerptId === null) {
+    const source = makePlaceholderSource();
+    S.doc.sources.push(source);
+    const exc = makeExcerpt(
+      { label, ...(shortLabel ? { shortLabel } : {}), ...(hotkey ? { hotkey } : {}) },
+      source.id,
+    );
+    S.doc.excerpts.push(exc);
+    S.selectedId = exc.id;
+    S.app.selectedExcerptId = exc.id;
+    persistApp();
+    say(`added "${shortLabel || label}" — press L to link its recording`);
+  } else {
+    const exc = S.doc.excerpts.find((e) => e.id === S.editor.excerptId);
+    if (!exc) return "excerpt no longer exists";
+    exc.label = label;
+    if (shortLabel) exc.shortLabel = shortLabel;
+    else delete exc.shortLabel;
+    if (hotkey) exc.hotkey = hotkey;
+    else delete exc.hotkey;
+    say(`saved "${shortLabel || label}"`);
+  }
+  persistDoc();
+  S.editor.open = false;
+  render();
+  return null;
+}
+
+function deleteExcerptFlow(excerptId: string): void {
+  const idx = S.doc.excerpts.findIndex((e) => e.id === excerptId);
+  if (idx === -1) return;
+  const [gone] = S.doc.excerpts.splice(idx, 1);
+  pruneOrphanSources();
+  pruneOrphanAssets();
+  if (S.loopingId === excerptId) {
+    S.engine?.setLoop(null);
+    S.engine?.pause();
+    S.loopingId = null;
+  }
+  if (S.selectedId === excerptId) {
+    S.selectedId = S.doc.excerpts[0]?.id ?? null;
+    S.app.selectedExcerptId = S.selectedId;
+    persistApp();
+  }
+  persistDoc();
+  S.editor.open = false;
+  say(`deleted "${gone?.shortLabel ?? gone?.label ?? "excerpt"}"`);
+  render();
+  void renderImage();
+}
+
 // ---------- audio boot ----------
 
 async function loadIntoEngine(file: File, sourceId: string): Promise<void> {
@@ -528,7 +771,14 @@ function render(): void {
 
   // status bar
   const bar = h("div", "status");
-  bar.append(h("span", "project", S.doc.name));
+  const projBtn = h("button", "project", `${S.doc.name} ▾`);
+  projBtn.type = "button";
+  projBtn.title = "projects: switch, import/export, create";
+  projBtn.addEventListener("click", () => {
+    projBtn.blur();
+    openLibrary();
+  });
+  bar.append(projBtn);
   const exc = selected();
   bar.append(h("span", "rate", exc ? `${rateFor(exc).toFixed(2)}×` : "—"));
   posEl = h("span", "pos");
@@ -582,7 +832,7 @@ function render(): void {
       if (data) detail.append(h("span", "assetmode", `${use.role}:${data.kind === "inline" ? "inline" : "file"}`));
     }
     card.append(detail);
-    // attach buttons: selected card only; mouse is allowed during setup (§10)
+    // attach/edit buttons: selected card only; mouse is allowed during setup (§10)
     if (e.id === S.selectedId) {
       const attach = h("div", "attach");
       for (const role of ["part", "score"] as const) {
@@ -594,6 +844,13 @@ function render(): void {
         });
         attach.append(btn);
       }
+      const edit = h("button", undefined, "edit");
+      edit.type = "button";
+      edit.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        openEditor(e.id);
+      });
+      attach.append(edit);
       card.append(attach);
     }
     card.addEventListener("click", () => {
@@ -602,9 +859,153 @@ function render(): void {
     });
     row.append(card);
   }
+  const add = h("button", "excerpt addcard", "+ excerpt");
+  add.type = "button";
+  add.addEventListener("click", () => {
+    add.blur();
+    openEditor(null);
+  });
+  row.append(add);
   app.append(row);
 
   if (S.linkModal.open) renderLinkModal();
+  if (S.libraryOpen) renderLibraryModal();
+  if (S.editor.open) renderEditorModal();
+}
+
+function renderLibraryModal(): void {
+  const backdrop = h("div", "modal-backdrop");
+  const modal = h("div", "modal");
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-label", "Projects");
+  modal.append(h("div", "modal-title", "Projects"));
+
+  const list = h("div", "projlist");
+  for (const p of S.projectList) {
+    const row = h("button", `projrow${p.id === S.doc.id ? " active" : ""}`);
+    row.type = "button";
+    row.append(h("span", "projrow-name", p.name));
+    row.append(
+      h("span", "projrow-count", `${p.excerptCount} excerpt${p.excerptCount === 1 ? "" : "s"}`),
+    );
+    row.addEventListener("click", () => void switchProject(p.id));
+    list.append(row);
+  }
+  if (S.projectList.length === 0) list.append(h("div", "modal-hint", "loading…"));
+  modal.append(list);
+
+  const form = h("form", "newproj");
+  const nameInput = h("input");
+  nameInput.type = "text";
+  nameInput.placeholder = "new project name";
+  nameInput.setAttribute("aria-label", "New project name");
+  const createBtn = h("button", "browse", "create");
+  createBtn.type = "submit";
+  form.append(nameInput, createBtn);
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    void createProject(nameInput.value);
+  });
+  modal.append(form);
+
+  const actions = h("div", "modal-actions");
+  const exportBtn = h("button", "browse", "export .json");
+  exportBtn.type = "button";
+  exportBtn.addEventListener("click", () => exportProjectFlow());
+  const importBtn = h("button", "browse", "import .json");
+  importBtn.type = "button";
+  importBtn.addEventListener("click", () => void importProjectFlow());
+  const delBtn = h(
+    "button",
+    "browse danger",
+    S.confirmProjectDelete ? "really delete? click again" : "delete this project",
+  );
+  delBtn.type = "button";
+  delBtn.addEventListener("click", () => {
+    if (S.confirmProjectDelete) void deleteActiveProject();
+    else {
+      S.confirmProjectDelete = true;
+      render();
+    }
+  });
+  actions.append(exportBtn, importBtn, delBtn);
+  modal.append(actions);
+  modal.append(h("div", "modal-hint", "Esc to close — export is the backup: keep those files somewhere safe"));
+
+  backdrop.addEventListener("click", (ev) => {
+    if (ev.target === backdrop) closeDialogs();
+  });
+  backdrop.append(modal);
+  app.append(backdrop);
+}
+
+function renderEditorModal(): void {
+  const editing = S.doc.excerpts.find((e) => e.id === S.editor.excerptId) ?? null;
+  const backdrop = h("div", "modal-backdrop");
+  const modal = h("div", "modal");
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-label", editing ? "Edit excerpt" : "New excerpt");
+  modal.append(h("div", "modal-title", editing ? "Edit excerpt" : "New excerpt"));
+
+  const form = h("form", "excform");
+  const field = (labelText: string, value: string, placeholder: string): HTMLInputElement => {
+    const wrap = h("label", "excfield");
+    wrap.append(h("span", undefined, labelText));
+    const input = h("input");
+    input.type = "text";
+    input.value = value;
+    input.placeholder = placeholder;
+    wrap.append(input);
+    form.append(wrap);
+    return input;
+  };
+  const labelIn = field("label", editing?.label ?? "", "Mvt IV — Fig 2, mm. 6–12");
+  const shortIn = field("short label", editing?.shortLabel ?? "", "IV/2 (card title)");
+  const hotkeyIn = field(
+    "hotkey",
+    editing?.hotkey ?? nextFreeHotkey(S.doc.excerpts) ?? "",
+    "one key, e.g. 4",
+  );
+  hotkeyIn.maxLength = 1;
+
+  const errEl = h("div", "form-error", "");
+  form.append(errEl);
+
+  const actions = h("div", "modal-actions");
+  const saveBtn = h("button", "browse", editing ? "save" : "add excerpt");
+  saveBtn.type = "submit";
+  actions.append(saveBtn);
+  if (editing) {
+    const delBtn = h(
+      "button",
+      "browse danger",
+      S.confirmExcerptDelete ? "really delete? click again" : "delete excerpt",
+    );
+    delBtn.type = "button";
+    delBtn.addEventListener("click", () => {
+      if (S.confirmExcerptDelete) deleteExcerptFlow(editing.id);
+      else {
+        S.confirmExcerptDelete = true;
+        delBtn.textContent = "really delete? click again"; // no render: keep the form intact
+      }
+    });
+    actions.append(delBtn);
+  }
+  form.append(actions);
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const err = saveExcerptFields(labelIn.value, shortIn.value, hotkeyIn.value);
+    if (err) errEl.textContent = err; // leave the form as typed
+  });
+  modal.append(form);
+  modal.append(h("div", "modal-hint", "Esc to cancel — timings are set later by tapping I/O during playback"));
+
+  backdrop.addEventListener("click", (ev) => {
+    if (ev.target === backdrop) closeDialogs();
+  });
+  backdrop.append(modal);
+  app.append(backdrop);
+  labelIn.focus();
 }
 
 function renderLinkModal(): void {
@@ -730,6 +1131,17 @@ function onKeydown(ev: KeyboardEvent): void {
     else if (k === "escape" || k === "l") closeLinkModal();
     return;
   }
+  // Library/editor dialogs contain text inputs, so unlike the link modal
+  // they swallow nothing: keys type normally, Enter submits the form,
+  // Escape closes. Returning before resolveIntent keeps Space/I/O/etc.
+  // from triggering playback underneath.
+  if (S.libraryOpen || S.editor.open) {
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      closeDialogs();
+    }
+    return;
+  }
   const hotkeys = new Set(
     S.doc.excerpts.flatMap((e) => (e.hotkey ? [e.hotkey.toLowerCase()] : [])),
   );
@@ -797,6 +1209,11 @@ async function boot(): Promise<void> {
     message: "",
     messageIsError: false,
     linkModal: { open: false, hint: "", target: { kind: "audio", excerptId: "" } },
+    libraryOpen: false,
+    projectList: [],
+    editor: { open: false, excerptId: null },
+    confirmProjectDelete: false,
+    confirmExcerptDelete: false,
   };
 
   // A drop that misses the dropzone must not navigate the page away from
@@ -838,6 +1255,7 @@ if (import.meta.env.DEV) {
   (window as unknown as Record<string, unknown>)["__looper"] = {
     pos: () => S.engine?.getPosition() ?? null,
     state: () => ({
+      projectId: S.doc.id,
       selectedId: S.selectedId,
       loopingId: S.loopingId,
       loadedSourceId: S.loadedSourceId,

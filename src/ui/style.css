@@ -65,6 +65,17 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 6px;
+}
+
+.status .project:hover {
+  color: var(--fg);
+  background: var(--bg);
 }
 
 /* Rate: a visible number, always (§8) — biggest thing in the bar */
@@ -334,6 +345,132 @@ body {
 
 .modal .browse:hover {
   border-color: var(--accent);
+}
+
+.modal .danger {
+  color: var(--warn);
+}
+
+.modal .danger:hover {
+  border-color: var(--warn);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.modal-actions .browse {
+  flex: 1;
+}
+
+/* ---- project library ---- */
+
+.projlist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.projrow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  font: inherit;
+  background: var(--bg);
+  color: var(--fg);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  padding: 0.55rem 0.8rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.projrow:hover {
+  border-color: var(--dim);
+}
+
+.projrow.active {
+  border-color: var(--accent);
+}
+
+.projrow-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projrow-count {
+  color: var(--dim);
+  font-size: 0.85rem;
+  flex: none;
+}
+
+.newproj {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.newproj input {
+  flex: 1;
+}
+
+/* ---- excerpt editor ---- */
+
+.modal input {
+  font: inherit;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--dim);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+
+.modal input:focus {
+  outline: 2px solid var(--focus);
+  border-color: transparent;
+}
+
+.excform {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.excfield {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.excfield span {
+  color: var(--dim);
+  font-size: 0.85rem;
+}
+
+.form-error {
+  color: var(--warn);
+  min-height: 1.2em;
+  font-size: 0.9rem;
+}
+
+/* the add-excerpt card at the end of the row */
+.excerpt.addcard {
+  min-width: 7rem;
+  border: 2px dashed var(--dim);
+  background: none;
+  color: var(--dim);
+  font-size: 1.05rem;
+  text-align: center;
+}
+
+.excerpt.addcard:hover {
+  color: var(--fg);
+  border-color: var(--fg);
 }
 
 /* ---- arm overlay: one gesture arms audio + file permission (§11) ---- */

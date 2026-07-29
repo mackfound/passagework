@@ -54,6 +54,15 @@ export async function idbPut(store: string, key: string, value: unknown): Promis
   });
 }
 
+export async function idbGetAll<T>(store: string): Promise<T[]> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(store, "readonly").objectStore(store).getAll();
+    req.onsuccess = () => resolve(req.result as T[]);
+    req.onerror = () => reject(req.error ?? new Error(`getAll ${store} failed`));
+  });
+}
+
 export async function idbDelete(store: string, key: string): Promise<void> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
