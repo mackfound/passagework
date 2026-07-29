@@ -6,7 +6,7 @@
  */
 
 import type { FileRef } from "../core";
-import { STORES, idbGet, idbPut } from "./db";
+import { STORES, idbDelete, idbGet, idbPut } from "./db";
 
 export type ResolvedAudio =
   | { ok: true; file: File }
@@ -14,6 +14,10 @@ export type ResolvedAudio =
 
 export async function saveHandle(key: string, handle: FileSystemFileHandle): Promise<void> {
   await idbPut(STORES.handles, key, handle);
+}
+
+export async function deleteHandle(key: string): Promise<void> {
+  await idbDelete(STORES.handles, key);
 }
 
 /**
@@ -46,44 +50,42 @@ export function looksLikeAudio(file: File): boolean {
 }
 
 /**
- * Resolve a drag-and-drop payload to a linked audio file.
- * Prefers a persistable handle (getAsFileSystemHandle, Chromium); falls back
- * to the session-only File with a `filename` ref — playable now, but needing
- * re-selection after a restart. Callers surface that difference honestly.
+ * Resolve a drag-and-drop payload to an audio file plus, when Chromium
+ * grants one, a persistable handle (getAsFileSystemHandle). Persisting is
+ * the caller's job: which source the handle belongs to isn't known until
+ * the caller decides whether this file dedups into an existing source.
+ * `handle: null` means session-only — playable now, needing re-selection
+ * after a restart. Callers surface that difference honestly.
  */
-export async function linkFromDataTransfer(
+export async function audioFromDataTransfer(
   dt: DataTransfer,
-  handleKey: string,
-): Promise<{ file: File; ref: FileRef; persistent: boolean } | { error: string } | null> {
+): Promise<{ file: File; handle: FileSystemFileHandle | null } | { error: string } | null> {
   const item = Array.from(dt.items).find((i) => i.kind === "file");
   if (!item) return null;
+  let handle: FileSystemFileHandle | null = null;
+  let file: File | null = null;
   if (typeof item.getAsFileSystemHandle === "function") {
     try {
-      const handle = await item.getAsFileSystemHandle();
-      if (handle && handle.kind === "file") {
-        const fileHandle = handle as FileSystemFileHandle;
-        const file = await fileHandle.getFile();
-        if (!looksLikeAudio(file)) return { error: `"${file.name}" doesn't look like an audio file` };
-        await saveHandle(handleKey, fileHandle);
-        return { file, ref: { kind: "fsHandle", key: handleKey }, persistent: true };
+      const h = await item.getAsFileSystemHandle();
+      if (h && h.kind === "file") {
+        handle = h as FileSystemFileHandle;
+        file = await handle.getFile();
       }
     } catch {
       /* fall through to the session-only path */
     }
   }
-  const file = item.getAsFile();
+  file ??= item.getAsFile();
   if (!file) return null;
   if (!looksLikeAudio(file)) return { error: `"${file.name}" doesn't look like an audio file` };
-  return { file, ref: { kind: "filename", name: file.name }, persistent: false };
+  return { file, handle };
 }
 
 /**
- * Show the audio file picker and persist the chosen handle.
- * Returns null if the user cancelled. Requires a user gesture.
+ * Show the audio file picker. Returns null if the user cancelled.
+ * Requires a user gesture. As with drops, the caller persists the handle.
  */
-export async function pickAudioFile(
-  handleKey: string,
-): Promise<{ file: File; ref: FileRef } | null> {
+export async function pickAudio(): Promise<{ file: File; handle: FileSystemFileHandle } | null> {
   let handle: FileSystemFileHandle;
   try {
     [handle] = (await window.showOpenFilePicker({
@@ -101,7 +103,5 @@ export async function pickAudioFile(
   } catch {
     return null; // user cancelled (AbortError)
   }
-  await saveHandle(handleKey, handle);
-  const file = await handle.getFile();
-  return { file, ref: { kind: "fsHandle", key: handleKey } };
+  return { file: await handle.getFile(), handle };
 }

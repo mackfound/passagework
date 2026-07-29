@@ -221,6 +221,18 @@ body {
   font-weight: 600;
 }
 
+/* which recording the card plays — sources can differ per excerpt */
+.excerpt .srcname {
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.excerpt .srcname.missing {
+  color: var(--warn);
+}
+
 .excerpt .attach {
   margin-top: 0.45rem;
   display: flex;

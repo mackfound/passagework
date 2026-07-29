@@ -9,10 +9,10 @@ import {
   type AppState,
   type Excerpt,
   type ProjectDoc,
+  type Source,
   GRID,
   NUDGE_COARSE,
   RATE_MAX,
-  SEED_SOURCE_ID,
   clampRate,
   entryPosition,
   normalizeRegion,
@@ -23,22 +23,25 @@ import {
 } from "../core";
 import { MediaElementEngine } from "../audio/MediaElementEngine";
 import {
+  audioFromDataTransfer,
+  deleteHandle,
   imageFromDataTransfer,
-  linkFromDataTransfer,
   loadOrSeedProject,
   loadAppState,
-  pickAudioFile,
+  pickAudio,
   pickImage,
   resolveAssetUrl,
   resolveAudio,
   saveAppState,
+  saveHandle,
   saveProject,
 } from "../storage";
 import type { AssetData } from "../core";
-import type { FileRef } from "../core";
 import "./style.css";
 
-const AUDIO_HANDLE_KEY = "handle_main";
+function handleKeyFor(sourceId: string): string {
+  return `handle_${sourceId}`;
+}
 
 // ---------- state ----------
 
@@ -46,8 +49,12 @@ interface UiState {
   doc: ProjectDoc;
   app: AppState;
   engine: MediaElementEngine | null;
+  /** Duration of the source currently in the engine. */
   duration: number | null;
-  audioReady: boolean;
+  /** Which source the engine holds — sources swap as excerpts are triggered. */
+  loadedSourceId: string | null;
+  /** Session cache: resolved Files by sourceId, so switching back is instant. */
+  files: Map<string, File>;
   selectedId: string | null;
   loopingId: string | null;
   draftStart: number | null; // tap-in awaiting its tap-out
@@ -58,9 +65,9 @@ interface UiState {
   linkModal: { open: boolean; hint: string; target: LinkTarget };
 }
 
-/** What the link modal is linking: the recording, or one excerpt's image slot. */
+/** What the link modal is linking: one excerpt's recording, or its image slot. */
 type LinkTarget =
-  | { kind: "audio" }
+  | { kind: "audio"; excerptId: string }
   | { kind: "image"; excerptId: string; role: "part" | "score" };
 
 let S: UiState;
@@ -81,6 +88,15 @@ function persistApp(): void {
 
 function selected(): Excerpt | null {
   return S.doc.excerpts.find((e) => e.id === S.selectedId) ?? null;
+}
+
+function sourceOf(exc: Excerpt): Source | null {
+  return S.doc.sources.find((s) => s.id === exc.sourceId) ?? null;
+}
+
+/** The seed placeholder source has a filename ref with an empty name. */
+function isLinked(source: Source | null): boolean {
+  return !!source && (source.fileRef.kind === "fsHandle" || source.fileRef.name !== "");
 }
 
 function rateFor(exc: Excerpt): number {
@@ -108,7 +124,7 @@ function triggerExcerpt(hotkey: string): void {
     return;
   }
   selectExcerpt(exc);
-  startLoop(exc);
+  void startLoop(exc);
 }
 
 function selectExcerpt(exc: Excerpt): void {
@@ -122,11 +138,9 @@ function selectExcerpt(exc: Excerpt): void {
   render();
 }
 
-function startLoop(exc: Excerpt): void {
-  if (!S.engine || !S.audioReady) {
-    say("no audio linked — press L to link the recording", true);
-    return;
-  }
+async function startLoop(exc: Excerpt): Promise<void> {
+  if (!S.engine) return;
+  if (!(await ensureSourceLoaded(exc))) return;
   if (!exc.region) {
     S.loopingId = null;
     S.engine.setLoop(null);
@@ -157,14 +171,46 @@ function stopLoop(pause: boolean): void {
   render();
 }
 
-function togglePlay(): void {
-  if (!S.engine || !S.audioReady) {
-    say("no audio linked — press L to link the recording", true);
-    return;
-  }
+async function togglePlay(): Promise<void> {
+  const exc = selected();
+  if (!exc || !S.engine) return;
+  if (!(await ensureSourceLoaded(exc))) return;
   if (S.engine.paused) S.engine.play();
   else S.engine.pause();
   renderStatus();
+}
+
+/**
+ * Make sure the engine holds this excerpt's recording, resolving and
+ * loading it on demand. Runs inside a keypress gesture, so a stale
+ * handle's permission re-prompt can succeed here (§5). On failure the
+ * link modal opens for this excerpt and the trigger is abandoned.
+ */
+async function ensureSourceLoaded(exc: Excerpt): Promise<boolean> {
+  if (!S.engine) return false;
+  if (S.loadedSourceId === exc.sourceId) return true;
+  const source = sourceOf(exc);
+  if (!source) return false;
+  let file = S.files.get(exc.sourceId) ?? null;
+  if (!file) {
+    const resolved = await resolveAudio(source.fileRef);
+    if (!resolved.ok) {
+      const why = {
+        "no-handle": `no recording linked for "${exc.shortLabel ?? exc.label}" yet`,
+        "permission-denied": "permission to the recording was denied",
+        "file-missing": "the recording moved or was deleted",
+      }[resolved.reason];
+      say(`${why} — press L to link it`, true);
+      openLinkModal(why, { kind: "audio", excerptId: exc.id });
+      return false;
+    }
+    file = resolved.file;
+  }
+  S.files.set(exc.sourceId, file);
+  await loadIntoEngine(file, exc.sourceId);
+  // a successful load satisfies whatever the audio modal was asking for
+  if (S.linkModal.open && S.linkModal.target.kind === "audio") closeLinkModal();
+  return true;
 }
 
 function rateStepIntent(dir: 1 | -1): void {
@@ -188,7 +234,11 @@ function rateReset(): void {
 
 function tap(edge: "start" | "end"): void {
   const exc = selected();
-  if (!exc || !S.engine || !S.audioReady) return;
+  if (!exc || !S.engine) return;
+  if (S.loadedSourceId !== exc.sourceId) {
+    say("play this excerpt first — its recording isn't loaded", true);
+    return;
+  }
   const pos = quantize(S.engine.getPosition());
   if (edge === "start") {
     if (exc.region) {
@@ -257,10 +307,10 @@ function stepSelection(dir: 1 | -1): void {
   const next = list[(idx + dir + list.length) % list.length];
   if (!next) return;
   selectExcerpt(next);
-  if (next.region) startLoop(next); // pedal flow: next excerpt starts looping
+  if (next.region) void startLoop(next); // pedal flow: next excerpt starts looping
 }
 
-function openLinkModal(hint: string, target: LinkTarget = { kind: "audio" }): void {
+function openLinkModal(hint: string, target: LinkTarget): void {
   S.linkModal = { open: true, hint, target };
   render();
 }
@@ -270,40 +320,86 @@ function closeLinkModal(): void {
   render();
 }
 
+/**
+ * Attach a picked/dropped recording to one excerpt. Identical filenames
+ * dedup into a single source, so excerpts from the same movement share
+ * one recording (and one persisted handle) instead of storing it twice.
+ */
 async function completeLink(
-  picked: { file: File; ref: FileRef },
-  persistent: boolean,
+  file: File,
+  handle: FileSystemFileHandle | null,
+  excerptId: string,
 ): Promise<void> {
-  const source = S.doc.sources.find((s) => s.id === SEED_SOURCE_ID) ?? S.doc.sources[0];
-  if (!source) return;
-  source.fileRef = picked.ref;
-  await loadIntoEngine(picked.file, source.id);
+  const exc = S.doc.excerpts.find((e) => e.id === excerptId);
+  if (!exc) return;
+
+  let source = S.doc.sources.find((s) => isLinked(s) && s.label === file.name) ?? null;
+  if (!source) {
+    const current = sourceOf(exc);
+    const shared = S.doc.excerpts.some((e) => e.id !== exc.id && e.sourceId === exc.sourceId);
+    if (current && !shared) {
+      source = current; // sole user: replace this excerpt's recording in place
+    } else {
+      source = {
+        id: `src_${crypto.randomUUID().slice(0, 8)}`,
+        label: "",
+        fileRef: { kind: "filename", name: "" },
+        duration: null,
+        sampleRate: null,
+      };
+      S.doc.sources.push(source);
+    }
+    source.label = file.name;
+    source.duration = null;
+    source.sampleRate = null;
+  }
+  exc.sourceId = source.id;
+
+  if (handle) {
+    // reuse the source's existing key so a re-drop refreshes a stale handle
+    const key = source.fileRef.kind === "fsHandle" ? source.fileRef.key : handleKeyFor(source.id);
+    await saveHandle(key, handle);
+    source.fileRef = { kind: "fsHandle", key };
+  } else if (source.fileRef.kind !== "fsHandle") {
+    source.fileRef = { kind: "filename", name: file.name };
+  }
+  const persistent = source.fileRef.kind === "fsHandle";
+
+  // prune sources no excerpt points at any more (and their stored handles)
+  const used = new Set(S.doc.excerpts.map((e) => e.sourceId));
+  for (const s of S.doc.sources) {
+    if (!used.has(s.id) && s.fileRef.kind === "fsHandle") void deleteHandle(s.fileRef.key);
+  }
+  S.doc.sources = S.doc.sources.filter((s) => used.has(s.id));
+
+  S.files.set(source.id, file);
+  await loadIntoEngine(file, source.id);
   persistDoc();
   S.linkModal.open = false;
   say(
     persistent
-      ? `linked: ${picked.file.name}`
-      : `linked for this session: ${picked.file.name} — re-link after a restart`,
+      ? `linked to "${exc.shortLabel ?? exc.label}": ${file.name}`
+      : `linked for this session: ${file.name} — re-link after a restart`,
     !persistent,
   );
   render();
 }
 
-async function browseForAudio(): Promise<void> {
-  const picked = await pickAudioFile(AUDIO_HANDLE_KEY);
+async function browseForAudio(excerptId: string): Promise<void> {
+  const picked = await pickAudio();
   if (!picked) return;
-  await completeLink(picked, true);
+  await completeLink(picked.file, picked.handle, excerptId);
 }
 
-async function dropAudio(dt: DataTransfer): Promise<void> {
-  const result = await linkFromDataTransfer(dt, AUDIO_HANDLE_KEY);
+async function dropAudio(dt: DataTransfer, excerptId: string): Promise<void> {
+  const result = await audioFromDataTransfer(dt);
   if (!result) return;
   if ("error" in result) {
     S.linkModal.hint = result.error;
     render();
     return;
   }
-  await completeLink(result, result.persistent);
+  await completeLink(result.file, result.handle, excerptId);
 }
 
 // ---------- image linking (same modal, image target) ----------
@@ -349,7 +445,7 @@ async function dropImage(dt: DataTransfer, excerptId: string, role: "part" | "sc
 /** Modal Enter/B and the browse button route here; the drop handler routes to drop*. */
 function browseForTarget(): void {
   const t = S.linkModal.target;
-  if (t.kind === "audio") void browseForAudio();
+  if (t.kind === "audio") void browseForAudio(t.excerptId);
   else void browseForImage(t.excerptId, t.role);
 }
 
@@ -359,7 +455,7 @@ async function loadIntoEngine(file: File, sourceId: string): Promise<void> {
   if (!S.engine) return;
   const loaded = await S.engine.load({ id: sourceId, file });
   S.duration = loaded.duration;
-  S.audioReady = true;
+  S.loadedSourceId = sourceId;
   const source = S.doc.sources.find((s) => s.id === sourceId);
   if (source && source.duration !== loaded.duration) {
     source.duration = loaded.duration;
@@ -367,27 +463,35 @@ async function loadIntoEngine(file: File, sourceId: string): Promise<void> {
   }
 }
 
-/** Runs inside the arm gesture: AudioContext resume + handle permission in one go (§11). */
+/**
+ * Runs inside the arm gesture: AudioContext resume + handle permission in
+ * one go (§11). Only the selected excerpt's source is resolved here — the
+ * rest load lazily on trigger, each inside its own keypress gesture.
+ */
 async function armAudio(): Promise<void> {
   const ctx = new AudioContext();
   await ctx.resume();
   S.engine = new MediaElementEngine(ctx);
   S.engine.onTick(onTick);
 
-  const source = S.doc.sources[0];
-  if (!source) return;
-  const resolved = await resolveAudio(source.fileRef);
+  const exc = selected();
+  if (!exc) return;
+  const source = sourceOf(exc);
+  const resolved = source
+    ? await resolveAudio(source.fileRef)
+    : ({ ok: false, reason: "no-handle" } as const);
   if (resolved.ok) {
-    await loadIntoEngine(resolved.file, source.id);
+    S.files.set(exc.sourceId, resolved.file);
+    await loadIntoEngine(resolved.file, exc.sourceId);
     say(`audio ready: ${resolved.file.name}`);
   } else {
     const why = {
-      "no-handle": "no recording linked yet",
+      "no-handle": `no recording linked for "${exc.shortLabel ?? exc.label}" yet`,
       "permission-denied": "permission to the recording was denied",
       "file-missing": "the recording moved or was deleted",
     }[resolved.reason];
     say(`${why} — press L to link it`, true);
-    openLinkModal(why);
+    openLinkModal(why, { kind: "audio", excerptId: exc.id });
   }
 }
 
@@ -457,6 +561,13 @@ function render(): void {
         ? h("span", undefined, `${fmtTime(e.region.start)}–${fmtTime(e.region.end)}`)
         : h("span", "untimed", "untimed"),
     );
+    // which recording this card plays — sources differ per excerpt now
+    const src = sourceOf(e);
+    detail.append(
+      isLinked(src)
+        ? h("span", "srcname", src!.label)
+        : h("span", "srcname missing", "no recording"),
+    );
     for (const use of e.assets) {
       const data = S.doc.assets[use.ref];
       if (data) detail.append(h("span", "assetmode", `${use.role}:${data.kind === "inline" ? "inline" : "file"}`));
@@ -518,7 +629,7 @@ function renderLinkModal(): void {
     ev.preventDefault();
     zone.classList.remove("over");
     if (!ev.dataTransfer) return;
-    if (target.kind === "audio") void dropAudio(ev.dataTransfer);
+    if (target.kind === "audio") void dropAudio(ev.dataTransfer, target.excerptId);
     else void dropImage(ev.dataTransfer, target.excerptId, target.role);
   });
   modal.append(zone);
@@ -623,7 +734,7 @@ function onKeydown(ev: KeyboardEvent): void {
   if (ev.repeat && intent.type !== "nudge" && intent.type !== "rateStep") return;
 
   switch (intent.type) {
-    case "togglePlay": togglePlay(); break;
+    case "togglePlay": void togglePlay(); break;
     case "stopLoop": stopLoop(false); break;
     case "rateStep": rateStepIntent(intent.dir); break;
     case "rateReset": rateReset(); break;
@@ -634,9 +745,18 @@ function onKeydown(ev: KeyboardEvent): void {
     case "triggerExcerpt": triggerExcerpt(intent.hotkey); break;
     case "prevExcerpt": stepSelection(-1); break;
     case "nextExcerpt": stepSelection(1); break;
-    case "linkAudio":
-      openLinkModal(S.audioReady ? "replace the current recording" : "link the recording");
+    case "linkAudio": {
+      const exc = selected();
+      if (!exc) break;
+      const name = exc.shortLabel ?? exc.label;
+      openLinkModal(
+        isLinked(sourceOf(exc))
+          ? `replace the recording for "${name}"`
+          : `link a recording for "${name}"`,
+        { kind: "audio", excerptId: exc.id },
+      );
       break;
+    }
   }
 }
 
@@ -648,23 +768,26 @@ async function boot(): Promise<void> {
   // re-seed (destroying regions) on the next launch.
   const doc = await loadOrSeedProject();
   const appState = await loadAppState();
+  const selectedId =
+    doc.excerpts.find((e) => e.id === appState.selectedExcerptId)?.id ??
+    doc.excerpts[0]?.id ??
+    null;
+  const selectedExc = doc.excerpts.find((e) => e.id === selectedId);
   S = {
     doc,
     app: appState,
     engine: null,
-    duration: doc.sources[0]?.duration ?? null,
-    audioReady: false,
-    selectedId:
-      doc.excerpts.find((e) => e.id === appState.selectedExcerptId)?.id ??
-      doc.excerpts[0]?.id ??
-      null,
+    duration: doc.sources.find((s) => s.id === selectedExc?.sourceId)?.duration ?? null,
+    loadedSourceId: null,
+    files: new Map(),
+    selectedId,
     loopingId: null,
     draftStart: null,
     preRollEnabled: true,
     imageRole: "part",
     message: "",
     messageIsError: false,
-    linkModal: { open: false, hint: "", target: { kind: "audio" } },
+    linkModal: { open: false, hint: "", target: { kind: "audio", excerptId: "" } },
   };
 
   // A drop that misses the dropzone must not navigate the page away from
@@ -688,7 +811,8 @@ async function boot(): Promise<void> {
     const armKey = ev instanceof KeyboardEvent ? ev.key.toLowerCase() : null;
     void armAudio().then(() => {
       render();
-      if (armKey && S.audioReady && S.doc.excerpts.some((e) => e.hotkey === armKey)) {
+      // triggering handles its own source load (and link modal on failure)
+      if (armKey && S.doc.excerpts.some((e) => e.hotkey === armKey)) {
         triggerExcerpt(armKey);
       }
     });
@@ -707,7 +831,7 @@ if (import.meta.env.DEV) {
     state: () => ({
       selectedId: S.selectedId,
       loopingId: S.loopingId,
-      audioReady: S.audioReady,
+      loadedSourceId: S.loadedSourceId,
       duration: S.duration,
       paused: S.engine?.paused ?? null,
     }),
