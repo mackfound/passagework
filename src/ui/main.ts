@@ -333,6 +333,10 @@ async function completeLink(
   const exc = S.doc.excerpts.find((e) => e.id === excerptId);
   if (!exc) return;
 
+  // captured before any mutation: the recording the timings were marked against
+  const prevSource = sourceOf(exc);
+  const prevLabel = isLinked(prevSource) ? prevSource!.label : null;
+
   let source = S.doc.sources.find((s) => isLinked(s) && s.label === file.name) ?? null;
   if (!source) {
     const current = sourceOf(exc);
@@ -376,12 +380,17 @@ async function completeLink(
   await loadIntoEngine(file, source.id);
   persistDoc();
   S.linkModal.open = false;
-  say(
-    persistent
-      ? `linked to "${exc.shortLabel ?? exc.label}": ${file.name}`
-      : `linked for this session: ${file.name} — re-link after a restart`,
-    !persistent,
-  );
+  // Timings are kept on a recording swap — right when re-pointing at the
+  // same performance in a moved/renamed file, stale when it's a different
+  // one. Warn rather than clear; re-tapping is cheap, lost marks aren't.
+  const staleTimings = prevLabel !== null && prevLabel !== file.name && exc.region !== null;
+  if (staleTimings) {
+    say(`linked: ${file.name} — loop points were marked against "${prevLabel}", re-check them`, true);
+  } else if (!persistent) {
+    say(`linked for this session: ${file.name} — re-link after a restart`, true);
+  } else {
+    say(`linked to "${exc.shortLabel ?? exc.label}": ${file.name}`);
+  }
   render();
 }
 
