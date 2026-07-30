@@ -78,6 +78,32 @@ body {
   background: var(--bg);
 }
 
+.status .projmenu {
+  background: none;
+  border: none;
+  color: var(--dim);
+  font: inherit;
+  cursor: pointer;
+  padding: 0.2rem 0.35rem;
+  border-radius: 6px;
+  margin-left: -1.1rem; /* sit tight against the name despite the bar's gap */
+}
+
+.status .projmenu:hover {
+  color: var(--fg);
+  background: var(--bg);
+}
+
+.status .project-edit {
+  font: inherit;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 0.15rem 0.4rem;
+  width: min(18rem, 30vw);
+}
+
 /* Rate: a visible number, always (§8) — biggest thing in the bar */
 .status .rate {
   font-size: 1.9rem;

@@ -527,6 +527,45 @@ function closeDialogs(): void {
   render();
 }
 
+/**
+ * Inline rename: swap the status-bar name button for an input in place —
+ * no dialog. Enter/blur commits, Escape cancels. The swap is imperative
+ * (outside render()) so typing never fights a re-render; any commit or
+ * cancel path ends in render(), which rebuilds the normal bar.
+ */
+function startRenameInline(btn: HTMLElement): void {
+  const input = h("input", "project-edit");
+  input.type = "text";
+  input.value = S.doc.name;
+  input.setAttribute("aria-label", "Project name");
+  let cancelled = false;
+  const commit = () => {
+    if (cancelled) return;
+    const name = input.value.trim();
+    if (name && name !== S.doc.name) {
+      S.doc.name = name;
+      // flush, not debounce: the library list reads names straight from IndexedDB
+      void flushDoc();
+      say(`renamed to "${name}"`);
+    } else {
+      render();
+    }
+  };
+  input.addEventListener("keydown", (ev) => {
+    ev.stopPropagation(); // keys type into the name, never reach the keymap
+    if (ev.key === "Enter") {
+      input.blur(); // commit runs once, via the blur handler
+    } else if (ev.key === "Escape") {
+      cancelled = true;
+      render();
+    }
+  });
+  input.addEventListener("blur", commit);
+  btn.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
 /** Point the UI at a different doc. Pure state reset — callers handle IO. */
 function adoptDoc(doc: ProjectDoc): void {
   S.doc = doc;
@@ -769,16 +808,20 @@ let regionBarEl: HTMLElement;
 function render(): void {
   app.textContent = "";
 
-  // status bar
+  // status bar: the name edits in place; the chevron opens the library
   const bar = h("div", "status");
-  const projBtn = h("button", "project", `${S.doc.name} ▾`);
-  projBtn.type = "button";
-  projBtn.title = "projects: switch, import/export, create";
-  projBtn.addEventListener("click", () => {
-    projBtn.blur();
+  const nameBtn = h("button", "project", S.doc.name);
+  nameBtn.type = "button";
+  nameBtn.title = "click to rename";
+  nameBtn.addEventListener("click", () => startRenameInline(nameBtn));
+  const menuBtn = h("button", "projmenu", "▾");
+  menuBtn.type = "button";
+  menuBtn.title = "projects: switch, import/export, create";
+  menuBtn.addEventListener("click", () => {
+    menuBtn.blur();
     openLibrary();
   });
-  bar.append(projBtn);
+  bar.append(nameBtn, menuBtn);
   const exc = selected();
   bar.append(h("span", "rate", exc ? `${rateFor(exc).toFixed(2)}×` : "—"));
   posEl = h("span", "pos");
@@ -1142,6 +1185,9 @@ function onKeydown(ev: KeyboardEvent): void {
     }
     return;
   }
+  // any focused text input owns its keys (inline rename stops propagation
+  // itself; this catches every current and future input outside a dialog)
+  if (ev.target instanceof HTMLInputElement || ev.target instanceof HTMLTextAreaElement) return;
   const hotkeys = new Set(
     S.doc.excerpts.flatMap((e) => (e.hotkey ? [e.hotkey.toLowerCase()] : [])),
   );
