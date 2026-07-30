@@ -1,3 +1,7 @@
-# Passagework
+# Passagework: web-native music practice tool
+### Loop short passages of:
+* orchestral recordings
+* solo pieces
+* modern repertoire
 
-WIP web-native practice tool: loop short passages of orchestral recordings against their sheet music, hands-free, for audition prep.
+against their sheet music, hands-free, for audition prep, intensive practice, or general accompaniment
