@@ -955,6 +955,29 @@ async function armAudio(): Promise<void> {
   }
 }
 
+/** False until the arming gesture; gates the keymap so the first key can't act. */
+let armed = false;
+let armOverlay: HTMLElement | null = null;
+
+/**
+ * Dismiss the landing overlay and start the audio stack. Idempotent — the
+ * click and keydown paths both land here.
+ *
+ * The overlay exists only because an AudioContext starts suspended and
+ * needs a user gesture (§11). The gesture is a precondition, not a command,
+ * so whatever key supplied it is consumed by onKeydown and never reaches
+ * the keymap: arriving on the main screen must not start playback, trigger
+ * an excerpt, or change any state.
+ */
+function armApp(): void {
+  if (armed) return;
+  armed = true;
+  armOverlay?.remove();
+  armOverlay = null;
+  render();
+  void armAudio().then(() => render());
+}
+
 // ---------- rendering ----------
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
@@ -1404,6 +1427,15 @@ function onTick(pos: number): void {
 // ---------- input ----------
 
 function onKeydown(ev: KeyboardEvent): void {
+  // The arming keystroke is swallowed whole: it only supplies the user
+  // gesture the AudioContext needs (§11), so it must not also mean
+  // something. preventDefault stops Space scrolling the page on the way.
+  if (!armed) {
+    ev.preventDefault();
+    if (ev.repeat) return;
+    armApp();
+    return;
+  }
   // The legend has no input to type into, so like the link modal it
   // swallows everything — reading the keys shouldn't be able to start
   // playback underneath. Escape closes it; nothing opens it from the
@@ -1533,26 +1565,14 @@ async function boot(): Promise<void> {
   overlay.append(h("div", undefined, APP_NAME));
   overlay.append(h("div", "hint", "press any key to begin"));
   document.body.append(overlay);
+  armOverlay = overlay;
+  overlay.addEventListener("click", armApp);
 
-  // "Open the tool, hit one key, the passage loops" (§1): if the arming
-  // keypress is an excerpt hotkey, trigger that excerpt once audio is up.
-  const arm = (ev?: KeyboardEvent) => {
-    window.removeEventListener("keydown", arm as EventListener, true);
-    overlay.removeEventListener("click", arm as EventListener);
-    overlay.remove();
-    render();
-    const armKey = ev instanceof KeyboardEvent ? ev.key.toLowerCase() : null;
-    void armAudio().then(() => {
-      render();
-      // triggering handles its own source load (and link modal on failure)
-      if (armKey && S.doc.excerpts.some((e) => e.hotkey === armKey)) {
-        triggerExcerpt(armKey);
-      }
-    });
-    window.addEventListener("keydown", onKeydown);
-  };
-  window.addEventListener("keydown", arm as EventListener, true);
-  overlay.addEventListener("click", arm as EventListener);
+  // A single keydown listener for the whole app's life, gated on `armed`.
+  // The previous shape registered this one from inside a capture-phase arm
+  // handler, so the arming keystroke bubbled straight back into it — Space
+  // armed the app and started playback in the same press.
+  window.addEventListener("keydown", onKeydown);
 }
 
 void boot();
