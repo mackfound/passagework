@@ -1007,7 +1007,7 @@ function render(): void {
   // Far right, and the only thing on screen that advertises a key at all.
   const helpBtn = h("button", "helpbtn", "?");
   helpBtn.type = "button";
-  helpBtn.title = "keyboard shortcuts (?)";
+  helpBtn.title = "keyboard shortcuts";
   helpBtn.setAttribute("aria-label", "keyboard shortcuts");
   helpBtn.addEventListener("click", () => {
     helpBtn.blur(); // keys stay global; a focus ring here would eat Space
@@ -1147,7 +1147,7 @@ function renderHelpModal(): void {
     list.append(h("span", undefined, row.description));
   }
   modal.append(list);
-  modal.append(h("div", "modal-hint", "Esc or ? to close"));
+  modal.append(h("div", "modal-hint", "Esc to close"));
 
   backdrop.addEventListener("click", (ev) => {
     if (ev.target === backdrop) toggleHelp();
@@ -1406,11 +1406,12 @@ function onTick(pos: number): void {
 function onKeydown(ev: KeyboardEvent): void {
   // The legend has no input to type into, so like the link modal it
   // swallows everything — reading the keys shouldn't be able to start
-  // playback underneath. Checked first so ? always closes what ? opened.
+  // playback underneath. Escape closes it; nothing opens it from the
+  // keyboard (see the keymap: the status-bar button is the only way in).
   if (S.helpOpen) {
     ev.preventDefault();
     if (ev.repeat) return;
-    if (ev.key === "Escape" || ev.key === "?") toggleHelp();
+    if (ev.key === "Escape") toggleHelp();
     return;
   }
   // The link modal owns the keyboard while open: Enter/B browse, Esc/L
@@ -1461,7 +1462,6 @@ function onKeydown(ev: KeyboardEvent): void {
     case "togglePreRoll": togglePreRoll(); break;
     case "toggleWaveform": toggleWaveform(); break;
     case "zoom": zoomIntent(intent.dir); break;
-    case "toggleHelp": toggleHelp(); break;
     case "triggerExcerpt": triggerExcerpt(intent.hotkey); break;
     case "prevExcerpt": stepSelection(-1); break;
     case "nextExcerpt": stepSelection(1); break;

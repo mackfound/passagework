@@ -18,7 +18,6 @@ export type Intent =
   | { type: "togglePreRoll" }
   | { type: "toggleWaveform" }
   | { type: "zoom"; dir: 1 | -1 }
-  | { type: "toggleHelp" }
   | { type: "triggerExcerpt"; hotkey: string }
   | { type: "prevExcerpt" }
   | { type: "nextExcerpt" }
@@ -57,7 +56,9 @@ const rules: Record<string, IntentRule> = {
   pageup: () => ({ type: "prevExcerpt" }),
   pagedown: () => ({ type: "nextExcerpt" }),
   l: () => ({ type: "linkAudio" }),
-  "?": () => ({ type: "toggleHelp" }),
+  // No binding opens the legend: "?" is Shift+/, a two-handed chord, which
+  // is exactly the gesture this app exists to avoid. The status-bar button
+  // is the only way in, and that is the right one.
 };
 
 /** Every key the fixed keymap claims. Drives the legend's drift test. */
@@ -98,7 +99,6 @@ export const KEYMAP_HELP: readonly KeyHelp[] = [
   { keys: "W", description: "waveform: drag to set loop points, click to seek", covers: ["w"] },
   { keys: "− / =", description: "zoom the waveform out / in", covers: ["-", "="] },
   { keys: "L", description: "link or replace this excerpt's recording", covers: ["l"] },
-  { keys: "?", description: "this list", covers: ["?"] },
 ];
 
 /**

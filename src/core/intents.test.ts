@@ -60,8 +60,8 @@ describe("resolveIntent", () => {
     expect(resolveIntent(stroke("F5"), hotkeys)).toBeNull();
   });
 
-  it("opens the legend on ?", () => {
-    expect(resolveIntent(stroke("?"), hotkeys)).toEqual({ type: "toggleHelp" });
+  it("leaves ? unbound — Shift+/ is a chord, so the legend is button-only", () => {
+    expect(resolveIntent(stroke("?"), hotkeys)).toBeNull();
   });
 });
 
