@@ -9,6 +9,9 @@
  *              structured-clones handles into IndexedDB — spec §5)
  */
 
+// Persistence key, NOT branding: deliberately decoupled from APP_NAME
+// (src/config.ts). Renaming this string would orphan every existing
+// user's config — it stays whatever it was first shipped as.
 const DB_NAME = "excerpt-looper";
 const DB_VERSION = 1;
 

@@ -49,6 +49,7 @@ import {
   serializeProject,
 } from "../storage";
 import type { AssetData } from "../core";
+import { APP_NAME } from "../config";
 import "./style.css";
 
 function handleKeyFor(sourceId: string): string {
@@ -817,8 +818,10 @@ let regionBarEl: HTMLElement;
 function render(): void {
   app.textContent = "";
 
-  // status bar: the name edits in place; the chevron opens the library
+  // status bar: brand mark, then the project name (edits in place) and
+  // the chevron that opens the library
   const bar = h("div", "status");
+  bar.append(h("span", "brand", APP_NAME));
   const nameBtn = h("button", "project", S.doc.name);
   nameBtn.type = "button";
   nameBtn.title = "click to rename";
@@ -1278,9 +1281,11 @@ async function boot(): Promise<void> {
   window.addEventListener("dragover", (ev) => ev.preventDefault());
   window.addEventListener("drop", (ev) => ev.preventDefault());
 
+  document.title = APP_NAME; // config wins over the index.html fallback
+
   // One gesture arms everything: AudioContext + file permission (§11).
   const overlay = h("div", "overlay");
-  overlay.append(h("div", undefined, "Excerpt Looper"));
+  overlay.append(h("div", undefined, APP_NAME));
   overlay.append(h("div", "hint", "press any key to begin"));
   document.body.append(overlay);
 
