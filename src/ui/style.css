@@ -88,6 +88,54 @@ body {
   background: var(--bg);
 }
 
+/* pushed to the far right; the app's only visible mention of a key */
+.status .helpbtn {
+  margin-left: auto;
+  flex: none;
+  background: none;
+  border: 1px solid var(--dim);
+  color: var(--dim);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 50%;
+}
+
+.status .helpbtn:hover {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+
+/* two columns: keys right-aligned against their descriptions */
+.modal.help .keylist {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.55rem 1rem;
+  align-items: baseline;
+  text-align: left;
+  margin: 0.4rem 0 0.2rem;
+  overflow-y: auto;
+  min-height: 0; /* let it shrink in the flex column rather than push the modal open */
+}
+
+.modal.help kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9rem;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid #33333d;
+  border-radius: 5px;
+  padding: 0.15rem 0.45rem;
+  white-space: nowrap;
+  justify-self: end;
+}
+
+.modal.help .keylist span {
+  color: var(--dim);
+}
+
 .status .projmenu {
   background: none;
   border: none;
@@ -372,6 +420,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  /* Without this a tall dialog centres itself and clips at BOTH ends, so
+   * the title and the "Esc to close" line are the first things lost. Each
+   * dialog's long list scrolls internally instead. */
+  max-height: 88vh;
 }
 
 .modal-title {

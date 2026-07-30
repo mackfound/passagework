@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveIntent } from "./intents";
+import { KEYMAP_HELP, isReservedKey, reservedKeys, resolveIntent } from "./intents";
 
 const hotkeys = new Set(["1", "2", "3", "d"]);
 const stroke = (key: string, shiftKey = false, altKey = false) => ({ key, shiftKey, altKey });
@@ -58,5 +58,41 @@ describe("resolveIntent", () => {
   it("returns null for unbound keys", () => {
     expect(resolveIntent(stroke("q"), hotkeys)).toBeNull();
     expect(resolveIntent(stroke("F5"), hotkeys)).toBeNull();
+  });
+
+  it("opens the legend on ?", () => {
+    expect(resolveIntent(stroke("?"), hotkeys)).toEqual({ type: "toggleHelp" });
+  });
+});
+
+/**
+ * The legend is the only discoverability the app has, so a binding the
+ * legend doesn't mention is invisible, and a legend row naming a binding
+ * that no longer exists is a lie. Both directions fail here rather than
+ * shipping.
+ */
+describe("KEYMAP_HELP stays in step with the keymap", () => {
+  const covered = KEYMAP_HELP.flatMap((row) => row.covers);
+
+  it("documents every reserved key", () => {
+    const undocumented = reservedKeys().filter((k) => !covered.includes(k));
+    expect(undocumented).toEqual([]);
+  });
+
+  it("names no key the keymap doesn't bind", () => {
+    const phantom = covered.filter((k) => !isReservedKey(k));
+    expect(phantom).toEqual([]);
+  });
+
+  it("documents each key exactly once", () => {
+    const dupes = covered.filter((k, i) => covered.indexOf(k) !== i);
+    expect(dupes).toEqual([]);
+  });
+
+  it("gives every row something to display", () => {
+    for (const row of KEYMAP_HELP) {
+      expect(row.keys.length).toBeGreaterThan(0);
+      expect(row.description.length).toBeGreaterThan(0);
+    }
   });
 });

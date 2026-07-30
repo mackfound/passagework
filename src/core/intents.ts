@@ -18,6 +18,7 @@ export type Intent =
   | { type: "togglePreRoll" }
   | { type: "toggleWaveform" }
   | { type: "zoom"; dir: 1 | -1 }
+  | { type: "toggleHelp" }
   | { type: "triggerExcerpt"; hotkey: string }
   | { type: "prevExcerpt" }
   | { type: "nextExcerpt" }
@@ -56,7 +57,49 @@ const rules: Record<string, IntentRule> = {
   pageup: () => ({ type: "prevExcerpt" }),
   pagedown: () => ({ type: "nextExcerpt" }),
   l: () => ({ type: "linkAudio" }),
+  "?": () => ({ type: "toggleHelp" }),
 };
+
+/** Every key the fixed keymap claims. Drives the legend's drift test. */
+export function reservedKeys(): string[] {
+  return Object.keys(rules);
+}
+
+/**
+ * The keymap in human terms — the legend ui/ renders (spec §8: nothing in
+ * this app is discoverable without it).
+ *
+ * It lives here, beside `rules`, rather than in ui/ because a legend that
+ * disagrees with the keymap is worse than no legend. `covers` names the
+ * `rules` entries each row documents, and a test asserts the two sides
+ * match exactly — so adding a binding without documenting it fails the
+ * build rather than shipping a quiet lie. Rows with an empty `covers` are
+ * modifiers or dynamic bindings that have no row of their own in `rules`.
+ */
+export interface KeyHelp {
+  keys: string;
+  description: string;
+  covers: string[];
+}
+
+export const KEYMAP_HELP: readonly KeyHelp[] = [
+  { keys: "1 – 9", description: "loop that excerpt — press again to stop", covers: [] },
+  { keys: "Space", description: "play / pause", covers: [" "] },
+  { keys: "Esc", description: "drop the loop, keep playing", covers: ["escape"] },
+  { keys: "PgUp / PgDn", description: "previous / next excerpt (pedal keys)", covers: ["pageup", "pagedown"] },
+  { keys: "I / O", description: "tap the loop in / out point while playing", covers: ["i", "o"] },
+  { keys: "← / →", description: "nudge the loop start by 10 ms", covers: ["arrowleft", "arrowright"] },
+  { keys: "Shift + ← / →", description: "nudge the loop end instead", covers: [] },
+  { keys: "Alt + ← / →", description: "nudge by 500 ms instead of 10 ms", covers: [] },
+  { keys: "[ / ]", description: "slower / faster", covers: ["[", "]"] },
+  { keys: "\\", description: "reset the rate", covers: ["\\"] },
+  { keys: "P", description: "pre-roll on / off", covers: ["p"] },
+  { keys: "Tab", description: "switch between the part and score images", covers: ["tab"] },
+  { keys: "W", description: "waveform: drag to set loop points, click to seek", covers: ["w"] },
+  { keys: "− / =", description: "zoom the waveform out / in", covers: ["-", "="] },
+  { keys: "L", description: "link or replace this excerpt's recording", covers: ["l"] },
+  { keys: "?", description: "this list", covers: ["?"] },
+];
 
 /**
  * True for keys the fixed keymap owns. An excerpt hotkey bound to one of

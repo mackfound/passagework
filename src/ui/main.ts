@@ -14,6 +14,7 @@ import {
   type Source,
   type ViewWindow,
   GRID,
+  KEYMAP_HELP,
   NUDGE_COARSE,
   RATE_MAX,
   clampRate,
@@ -105,6 +106,8 @@ interface UiState {
   peaksStatus: string;
   /** Visible time window. Null = derive from the excerpt's region on open. */
   view: ViewWindow | null;
+  /** Keymap legend. Nothing else in the app advertises a binding. */
+  helpOpen: boolean;
 }
 
 /** What the link modal is linking: one excerpt's recording, or its image slot. */
@@ -379,6 +382,11 @@ function toggleImage(): void {
 function togglePreRoll(): void {
   S.preRollEnabled = !S.preRollEnabled;
   say(S.preRollEnabled ? "pre-roll on" : "pre-roll off");
+  render();
+}
+
+function toggleHelp(): void {
+  S.helpOpen = !S.helpOpen;
   render();
 }
 
@@ -996,6 +1004,16 @@ function render(): void {
   bar.append(loopBadge, prBadge);
   const msg = h("span", `msg${S.messageIsError ? " error" : ""}`, S.message);
   bar.append(msg);
+  // Far right, and the only thing on screen that advertises a key at all.
+  const helpBtn = h("button", "helpbtn", "?");
+  helpBtn.type = "button";
+  helpBtn.title = "keyboard shortcuts (?)";
+  helpBtn.setAttribute("aria-label", "keyboard shortcuts");
+  helpBtn.addEventListener("click", () => {
+    helpBtn.blur(); // keys stay global; a focus ring here would eat Space
+    toggleHelp();
+  });
+  bar.append(helpBtn);
   app.append(bar);
 
   // stage
@@ -1108,6 +1126,34 @@ function render(): void {
   if (S.linkModal.open) renderLinkModal();
   if (S.libraryOpen) renderLibraryModal();
   if (S.editor.open) renderEditorModal();
+  if (S.helpOpen) renderHelpModal();
+}
+
+/**
+ * The keymap legend, built from core's KEYMAP_HELP rather than a copy kept
+ * here — a legend that drifts from the keymap is worse than none, and a
+ * test in core/ fails the build if the two disagree.
+ */
+function renderHelpModal(): void {
+  const backdrop = h("div", "modal-backdrop");
+  const modal = h("div", "modal help");
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-label", "Keyboard shortcuts");
+  modal.append(h("div", "modal-title", "Keys"));
+
+  const list = h("div", "keylist");
+  for (const row of KEYMAP_HELP) {
+    list.append(h("kbd", undefined, row.keys));
+    list.append(h("span", undefined, row.description));
+  }
+  modal.append(list);
+  modal.append(h("div", "modal-hint", "Esc or ? to close"));
+
+  backdrop.addEventListener("click", (ev) => {
+    if (ev.target === backdrop) toggleHelp();
+  });
+  backdrop.append(modal);
+  app.append(backdrop);
 }
 
 function renderLibraryModal(): void {
@@ -1358,6 +1404,15 @@ function onTick(pos: number): void {
 // ---------- input ----------
 
 function onKeydown(ev: KeyboardEvent): void {
+  // The legend has no input to type into, so like the link modal it
+  // swallows everything — reading the keys shouldn't be able to start
+  // playback underneath. Checked first so ? always closes what ? opened.
+  if (S.helpOpen) {
+    ev.preventDefault();
+    if (ev.repeat) return;
+    if (ev.key === "Escape" || ev.key === "?") toggleHelp();
+    return;
+  }
   // The link modal owns the keyboard while open: Enter/B browse, Esc/L
   // close. Everything else is swallowed so Space can't start playback
   // underneath a dialog.
@@ -1406,6 +1461,7 @@ function onKeydown(ev: KeyboardEvent): void {
     case "togglePreRoll": togglePreRoll(); break;
     case "toggleWaveform": toggleWaveform(); break;
     case "zoom": zoomIntent(intent.dir); break;
+    case "toggleHelp": toggleHelp(); break;
     case "triggerExcerpt": triggerExcerpt(intent.hotkey); break;
     case "prevExcerpt": stepSelection(-1); break;
     case "nextExcerpt": stepSelection(1); break;
@@ -1462,6 +1518,7 @@ async function boot(): Promise<void> {
     peaksSourceId: null,
     peaksStatus: "",
     view: null,
+    helpOpen: false,
   };
 
   // A drop that misses the dropzone must not navigate the page away from
