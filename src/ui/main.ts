@@ -8,12 +8,16 @@
 import {
   type AppState,
   type Excerpt,
+  type PeakEnvelope,
   type ProjectDoc,
+  type Region,
   type Source,
+  type ViewWindow,
   GRID,
   NUDGE_COARSE,
   RATE_MAX,
   clampRate,
+  clampView,
   entryPosition,
   isReservedKey,
   makeEmptyProject,
@@ -25,15 +29,20 @@ import {
   quantize,
   resolveIntent,
   stepRate,
+  viewForRegion,
+  zoomView,
 } from "../core";
 import { MediaElementEngine } from "../audio/MediaElementEngine";
+import { decodePeaks } from "../audio/peaks";
 import {
   type ProjectListing,
   audioFromDataTransfer,
+  deleteCachedPeaks,
   deleteHandle,
   deleteProject,
   imageFromDataTransfer,
   listProjects,
+  loadCachedPeaks,
   loadOrSeedProject,
   loadAppState,
   loadProject,
@@ -44,10 +53,12 @@ import {
   resolveAssetUrl,
   resolveAudio,
   saveAppState,
+  saveCachedPeaks,
   saveHandle,
   saveProject,
   serializeProject,
 } from "../storage";
+import { type WaveformHandle, createWaveform } from "./waveform";
 import type { AssetData } from "../core";
 import { APP_NAME } from "../config";
 import "./style.css";
@@ -84,6 +95,16 @@ interface UiState {
   /** Click-twice confirmations for the two destructive buttons. */
   confirmProjectDelete: boolean;
   confirmExcerptDelete: boolean;
+  /** Waveform panel (M3) — authoring only; closed by default so the score
+   *  keeps the screen during practice (§8). */
+  waveformOpen: boolean;
+  peaks: PeakEnvelope | null;
+  /** Which source `peaks` describes — sources swap as excerpts are triggered. */
+  peaksSourceId: string | null;
+  /** Shown in the panel while peaks are absent: decoding, or why they failed. */
+  peaksStatus: string;
+  /** Visible time window. Null = derive from the excerpt's region on open. */
+  view: ViewWindow | null;
 }
 
 /** What the link modal is linking: one excerpt's recording, or its image slot. */
@@ -191,9 +212,12 @@ function selectExcerpt(exc: Excerpt): void {
   persistApp();
   S.draftStart = null;
   S.imageRole = exc.assets.some((a) => a.role === "part") ? "part" : "score";
+  S.view = null; // re-fit the waveform to this excerpt's region
   S.engine?.setRate(rateFor(exc));
   void renderImage();
   render();
+  // A different excerpt may play a different recording; the panel follows.
+  if (S.waveformOpen) void ensurePeaks();
 }
 
 async function startLoop(exc: Excerpt): Promise<void> {
@@ -355,6 +379,111 @@ function toggleImage(): void {
 function togglePreRoll(): void {
   S.preRollEnabled = !S.preRollEnabled;
   say(S.preRollEnabled ? "pre-roll on" : "pre-roll off");
+  render();
+}
+
+// ---------- waveform (M3) ----------
+
+/**
+ * The window the panel is showing. Derived from the excerpt's region the
+ * first time it's needed, then owned by the user's zooming until the
+ * selection changes (selectExcerpt clears it).
+ */
+function currentView(): ViewWindow {
+  const duration = S.duration ?? 0;
+  S.view ??= viewForRegion(selected()?.region ?? null, duration);
+  return clampView(S.view, duration);
+}
+
+function toggleWaveform(): void {
+  S.waveformOpen = !S.waveformOpen;
+  if (S.waveformOpen) {
+    S.view = null; // re-fit to the current excerpt on each open
+    void ensurePeaks();
+  }
+  render();
+}
+
+function zoomIntent(dir: 1 | -1): void {
+  if (!S.waveformOpen || !S.peaks) return;
+  const duration = S.duration ?? 0;
+  // Anchor on the playhead, not the window centre: while looping, the
+  // interesting moment is where playback is.
+  const anchor = S.engine?.getPosition() ?? currentView().start;
+  S.view = zoomView(currentView(), dir === 1 ? 0.7 : 1 / 0.7, anchor, duration);
+  render();
+}
+
+/**
+ * Get the envelope for the loaded source: cache first, decode on a miss.
+ *
+ * Decoding is deliberately lazy — nothing computes peaks until the panel is
+ * opened, so practising never pays for an analysis pass it won't use. A
+ * failure is reported in the panel and nowhere else: tap-to-mark still
+ * works without a waveform, so this must never block playback.
+ */
+async function ensurePeaks(): Promise<void> {
+  const sourceId = S.loadedSourceId;
+  if (!sourceId) {
+    S.peaksStatus = "play this excerpt first — its recording isn't loaded";
+    S.peaks = null;
+    return;
+  }
+  if (S.peaksSourceId === sourceId && S.peaks) return;
+  const file = S.files.get(sourceId);
+  if (!file) {
+    S.peaksStatus = "recording unavailable";
+    S.peaks = null;
+    return;
+  }
+
+  S.peaks = null;
+  S.peaksSourceId = sourceId;
+  S.peaksStatus = "reading cached waveform…";
+  render();
+
+  const cached = await loadCachedPeaks(sourceId, file);
+  if (cached) {
+    // The panel may have been closed, or another source loaded, while this
+    // was in flight; only adopt the result if it's still the one wanted.
+    if (S.peaksSourceId === sourceId) {
+      S.peaks = cached;
+      render();
+    }
+    return;
+  }
+
+  S.peaksStatus = `analysing ${file.name}…`;
+  render();
+  const result = await decodePeaks(file);
+  if (S.peaksSourceId !== sourceId) return;
+  if (!result.ok) {
+    S.peaks = null;
+    S.peaksStatus =
+      result.reason === "too-large" ? result.detail : `couldn't read a waveform: ${result.detail}`;
+    render();
+    return;
+  }
+  S.peaks = result.env;
+  render();
+  void saveCachedPeaks(sourceId, file, result.env);
+}
+
+/** Region edits coming from the panel rather than the keyboard. */
+function waveformDraft(region: Region): void {
+  const exc = selected();
+  if (!exc) return;
+  exc.region = region;
+  if (S.loopingId === exc.id) S.engine?.setLoop(region);
+}
+
+function waveformCommit(region: Region): void {
+  const exc = selected();
+  if (!exc) return;
+  exc.region = region;
+  if (S.loopingId === exc.id) S.engine?.setLoop(region);
+  persistDoc();
+  say(`region set: ${fmtTime(region.start)} – ${fmtTime(region.end)}`);
   render();
 }
 
@@ -588,6 +717,12 @@ function adoptDoc(doc: ProjectDoc): void {
   S.duration = null;
   S.draftStart = null;
   S.imageRole = "part";
+  // Peaks belong to the outgoing project's source; drop them rather than
+  // draw the previous recording under the new project's excerpts.
+  S.peaks = null;
+  S.peaksSourceId = null;
+  S.peaksStatus = "";
+  S.view = null;
   S.engine?.setLoop(null);
   S.engine?.pause();
   S.app.activeProjectId = doc.id;
@@ -658,6 +793,7 @@ async function deleteActiveProject(): Promise<void> {
   // this project's stored handles go with it
   for (const s of S.doc.sources) {
     if (s.fileRef.kind === "fsHandle") void deleteHandle(s.fileRef.key);
+    void deleteCachedPeaks(s.id); // derived data, no reason to outlive the source
   }
   for (const data of Object.values(S.doc.assets)) {
     if (data.kind === "fsHandle") void deleteHandle(data.key);
@@ -774,6 +910,9 @@ async function loadIntoEngine(file: File, sourceId: string): Promise<void> {
     dirty = true;
   }
   if (dirty) persistDoc();
+  // The engine just swapped recordings; the open panel must not keep showing
+  // the previous one's envelope.
+  if (S.waveformOpen) void ensurePeaks();
 }
 
 /**
@@ -826,6 +965,8 @@ function h<K extends keyof HTMLElementTagNameMap>(
 let posEl: HTMLElement;
 let fillEl: HTMLElement;
 let regionBarEl: HTMLElement;
+/** Live panel, or null when closed. render() owns its lifecycle. */
+let waveform: WaveformHandle | null = null;
 
 function render(): void {
   app.textContent = "";
@@ -862,6 +1003,33 @@ function render(): void {
   stage.append(h("div", "placeholder", "no image for this excerpt yet"));
   app.append(stage);
   void renderImage();
+
+  // waveform panel (M3): between the score and the progress strip, so the
+  // image keeps the top of the screen even while authoring
+  waveform?.dispose();
+  waveform = null;
+  if (S.waveformOpen) {
+    waveform = createWaveform({
+      env: S.peaks,
+      status: S.peaksStatus,
+      region: selected()?.region ?? null,
+      view: currentView(),
+      duration: S.duration ?? 0,
+      position: () => S.engine?.getPosition() ?? 0,
+      onRegionDraft: waveformDraft,
+      onRegionCommit: waveformCommit,
+      onSeek: (t) => {
+        S.engine?.seek(t);
+        onTick(t);
+      },
+      onView: (v) => {
+        S.view = v;
+        render();
+      },
+    });
+    app.append(waveform.element);
+    waveform.mount(); // sizes the canvases now that they have a layout box
+  }
 
   // region progress strip
   regionBarEl = h("div", "regionbar");
@@ -1172,6 +1340,7 @@ function attachImage(exc: Excerpt, role: "part" | "score"): void {
 }
 
 function onTick(pos: number): void {
+  waveform?.tick();
   if (!posEl) return;
   const exc = selected();
   if (exc?.region) {
@@ -1235,6 +1404,8 @@ function onKeydown(ev: KeyboardEvent): void {
     case "tap": tap(intent.edge); break;
     case "toggleImage": toggleImage(); break;
     case "togglePreRoll": togglePreRoll(); break;
+    case "toggleWaveform": toggleWaveform(); break;
+    case "zoom": zoomIntent(intent.dir); break;
     case "triggerExcerpt": triggerExcerpt(intent.hotkey); break;
     case "prevExcerpt": stepSelection(-1); break;
     case "nextExcerpt": stepSelection(1); break;
@@ -1286,6 +1457,11 @@ async function boot(): Promise<void> {
     editor: { open: false, excerptId: null },
     confirmProjectDelete: false,
     confirmExcerptDelete: false,
+    waveformOpen: false,
+    peaks: null,
+    peaksSourceId: null,
+    peaksStatus: "",
+    view: null,
   };
 
   // A drop that misses the dropzone must not navigate the page away from
@@ -1335,6 +1511,10 @@ if (import.meta.env.DEV) {
       loadedSourceId: S.loadedSourceId,
       duration: S.duration,
       paused: S.engine?.paused ?? null,
+      region: S.doc.excerpts.find((e) => e.id === S.selectedId)?.region ?? null,
+      waveformOpen: S.waveformOpen,
+      view: S.view,
+      peakBuckets: S.peaks?.min.length ?? null,
     }),
   };
 }

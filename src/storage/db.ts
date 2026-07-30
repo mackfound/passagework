@@ -7,18 +7,26 @@
  *  - appState: session/progress state, singleton key
  *  - handles:  FileSystemFileHandle values keyed by string (Chromium
  *              structured-clones handles into IndexedDB — spec §5)
+ *  - peaks:    derived waveform envelopes keyed by source id (M3). Cache
+ *              only: discardable, never exported, and *not* audio — the
+ *              §5 ban on copying audio into IndexedDB stands.
+ *
+ * DB_VERSION bumps when a store is added. openDb's upgrade handler creates
+ * whatever is missing, so a bump alone migrates an existing database; the
+ * document's own schemaVersion (spec §4) is a separate, unrelated number.
  */
 
 // Persistence key, NOT branding: deliberately decoupled from APP_NAME
 // (src/config.ts). Renaming this string would orphan every existing
 // user's config — it stays whatever it was first shipped as.
 const DB_NAME = "excerpt-looper";
-const DB_VERSION = 1;
+const DB_VERSION = 2; // 2: added the peaks cache (M3)
 
 export const STORES = {
   projects: "projects",
   appState: "appState",
   handles: "handles",
+  peaks: "peaks",
 } as const;
 
 let dbPromise: Promise<IDBDatabase> | null = null;

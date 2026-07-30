@@ -184,6 +184,47 @@ body {
 
 /* ---- region strip: loop position at a glance from across the room ---- */
 
+/* ---- waveform panel (M3) ----
+ * Authoring surface, so it takes a fixed strip rather than competing with
+ * the score image for the stage (§8). Both canvases stack in the same box;
+ * the overlay is the one that receives pointer events.
+ */
+.waveform {
+  flex: none;
+  position: relative;
+  height: 108px;
+  margin: 0.5rem 1.2rem 0;
+  background: var(--panel);
+  border-radius: 6px;
+  overflow: hidden;
+  touch-action: none; /* pointer drags must not scroll the page */
+}
+
+.waveform canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.waveform .wf-peaks {
+  pointer-events: none;
+}
+
+.waveform .wf-overlay {
+  cursor: crosshair;
+}
+
+.waveform .wf-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  font-size: 0.85rem;
+  pointer-events: none;
+}
+
 .regionbar {
   flex: none;
   height: 10px;

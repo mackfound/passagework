@@ -26,3 +26,4 @@ export function serializeProject(doc: ProjectDoc): string {
 export * from "./projects";
 export * from "./files";
 export * from "./images";
+export * from "./peaks";

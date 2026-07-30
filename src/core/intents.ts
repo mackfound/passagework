@@ -16,6 +16,8 @@ export type Intent =
   | { type: "tap"; edge: "start" | "end" }
   | { type: "toggleImage" }
   | { type: "togglePreRoll" }
+  | { type: "toggleWaveform" }
+  | { type: "zoom"; dir: 1 | -1 }
   | { type: "triggerExcerpt"; hotkey: string }
   | { type: "prevExcerpt" }
   | { type: "nextExcerpt" }
@@ -47,6 +49,10 @@ const rules: Record<string, IntentRule> = {
   o: () => ({ type: "tap", edge: "end" }),
   tab: () => ({ type: "toggleImage" }),
   p: () => ({ type: "togglePreRoll" }),
+  w: () => ({ type: "toggleWaveform" }),
+  // Unshifted +/−, so zooming needs no modifier while an instrument is up.
+  "=": () => ({ type: "zoom", dir: 1 }),
+  "-": () => ({ type: "zoom", dir: -1 }),
   pageup: () => ({ type: "prevExcerpt" }),
   pagedown: () => ({ type: "nextExcerpt" }),
   l: () => ({ type: "linkAudio" }),
