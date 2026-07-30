@@ -193,6 +193,19 @@ body {
   color: var(--loop);
 }
 
+/* The engine badge is the one that's clickable; it reads as a badge and
+   behaves as a button, so it needs the button reset and an affordance. */
+button.badge {
+  font-family: inherit;
+  background: none;
+  cursor: pointer;
+}
+
+button.badge:hover {
+  border-color: var(--fg);
+  color: var(--fg);
+}
+
 .status .msg {
   margin-left: auto;
   color: var(--accent);

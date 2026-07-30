@@ -120,4 +120,10 @@ export interface AppState {
   workingRates: Record<string, number>;
   /** Restored on launch so "open tool, hit one key, it loops" holds (§1). */
   selectedExcerptId?: string | null;
+  /**
+   * Which playback engine to prefer (§6 M4). A property of this machine —
+   * its CPU, its memory, its browser — not of the project, which is why it
+   * lives here and not in ProjectDoc. Absent means the best available.
+   */
+  engine?: "worklet" | "media";
 }

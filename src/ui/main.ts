@@ -34,6 +34,8 @@ import {
   zoomView,
 } from "../core";
 import { MediaElementEngine } from "../audio/MediaElementEngine";
+import { EngineLoadError, WorkletEngine } from "../audio/WorkletEngine";
+import type { PlaybackEngine } from "../audio/PlaybackEngine";
 import { decodePeaks } from "../audio/peaks";
 import {
   type ProjectListing,
@@ -70,10 +72,17 @@ function handleKeyFor(sourceId: string): string {
 
 // ---------- state ----------
 
+/** Which implementation is actually running, as opposed to preferred. */
+type EngineKind = "worklet" | "media";
+
 interface UiState {
   doc: ProjectDoc;
   app: AppState;
-  engine: MediaElementEngine | null;
+  /** Created by the arm gesture and kept, so engines can be swapped on it. */
+  ctx: AudioContext | null;
+  engine: PlaybackEngine | null;
+  /** What `engine` is. May differ from S.app.engine after a fallback. */
+  engineKind: EngineKind;
   /** Duration of the source currently in the engine. */
   duration: number | null;
   /** Which source the engine holds — sources swap as excerpts are triggered. */
@@ -899,9 +908,94 @@ function deleteExcerptFlow(excerptId: string): void {
 
 // ---------- audio boot ----------
 
+/**
+ * Build an engine, degrading rather than failing. The spec asks for "a
+ * toggle to fall back" (§6 M4); this is its other half — a browser without
+ * AudioWorklet must land on the M1 engine, not on silence.
+ */
+async function buildEngine(
+  ctx: AudioContext,
+  want: EngineKind,
+): Promise<{ engine: PlaybackEngine; kind: EngineKind; note: string | null }> {
+  if (want === "media") return { engine: new MediaElementEngine(ctx), kind: "media", note: null };
+  try {
+    return { engine: await WorkletEngine.create(ctx), kind: "worklet", note: null };
+  } catch (err) {
+    const why = err instanceof EngineLoadError ? err.message : "the seamless engine failed to start";
+    return {
+      engine: new MediaElementEngine(ctx),
+      kind: "media",
+      note: `${why} — using the basic engine`,
+    };
+  }
+}
+
+/** Swap in a freshly built engine, disposing whatever it replaces. */
+function installEngine(built: { engine: PlaybackEngine; kind: EngineKind }): void {
+  S.engine?.dispose();
+  S.engine = built.engine;
+  S.engineKind = built.kind;
+  built.engine.onTick(onTick);
+}
+
+/**
+ * Flip engines and carry the loaded recording across (§6 M4). The choice
+ * sticks per machine. Playback stops rather than resuming: re-decoding a
+ * symphony takes seconds, and audio restarting on its own after that pause
+ * is a surprise, not a convenience.
+ */
+async function toggleEngine(): Promise<void> {
+  if (!S.ctx) return;
+  const want: EngineKind = S.engineKind === "worklet" ? "media" : "worklet";
+  const sourceId = S.loadedSourceId;
+  const file = sourceId ? S.files.get(sourceId) : undefined;
+  const at = S.engine?.getPosition() ?? 0;
+
+  const built = await buildEngine(S.ctx, want);
+  installEngine(built);
+  S.app.engine = built.kind;
+  persistApp();
+  S.loopingId = null;
+  S.loadedSourceId = null;
+  S.duration = null;
+
+  const named = built.kind === "worklet" ? "seamless engine on" : "basic engine on";
+  if (!file || !sourceId) {
+    say(built.note ?? named, Boolean(built.note));
+    render();
+    return;
+  }
+  try {
+    await loadIntoEngine(file, sourceId);
+    S.engine?.seek(at);
+    onTick(at);
+    say(built.note ?? named, Boolean(built.note));
+  } catch {
+    say(`"${file.name}" won't load into that engine — press L to link another`, true);
+  }
+  render();
+}
+
 async function loadIntoEngine(file: File, sourceId: string): Promise<void> {
-  if (!S.engine) return;
-  const loaded = await S.engine.load({ id: sourceId, file });
+  let engine = S.engine;
+  if (!engine) return;
+  // Decoding a long recording takes seconds and blocks nothing visibly;
+  // without this the app looks hung on the first trigger.
+  if (S.engineKind === "worklet") say(`decoding ${file.name} …`);
+
+  let loaded;
+  try {
+    loaded = await engine.load({ id: sourceId, file });
+  } catch (err) {
+    // A recording the worklet can't hold or decode is not a dead end — the
+    // M1 engine streams and doesn't care how long the file is.
+    if (!(err instanceof EngineLoadError) || S.engineKind !== "worklet" || !S.ctx) throw err;
+    const fallback = new MediaElementEngine(S.ctx);
+    installEngine({ engine: fallback, kind: "media" });
+    engine = fallback;
+    say(`${err.message} — using the basic engine`, true);
+    loaded = await fallback.load({ id: sourceId, file });
+  }
   S.duration = loaded.duration;
   S.loadedSourceId = sourceId;
   const source = S.doc.sources.find((s) => s.id === sourceId);
@@ -931,8 +1025,10 @@ async function loadIntoEngine(file: File, sourceId: string): Promise<void> {
 async function armAudio(): Promise<void> {
   const ctx = new AudioContext();
   await ctx.resume();
-  S.engine = new MediaElementEngine(ctx);
-  S.engine.onTick(onTick);
+  S.ctx = ctx;
+  const built = await buildEngine(ctx, S.app.engine ?? "worklet");
+  installEngine(built);
+  if (built.note) say(built.note, true);
 
   const exc = selected();
   if (!exc) return;
@@ -942,8 +1038,12 @@ async function armAudio(): Promise<void> {
     : ({ ok: false, reason: "no-handle" } as const);
   if (resolved.ok) {
     S.files.set(exc.sourceId, resolved.file);
-    await loadIntoEngine(resolved.file, exc.sourceId);
-    say(`audio ready: ${resolved.file.name}`);
+    try {
+      await loadIntoEngine(resolved.file, exc.sourceId);
+      say(`audio ready: ${resolved.file.name}`);
+    } catch {
+      say(`"${resolved.file.name}" won't play in this browser — press L to link another`, true);
+    }
   } else {
     const why = {
       "no-handle": `no recording linked for "${exc.shortLabel ?? exc.label}" yet`,
@@ -1024,7 +1124,19 @@ function render(): void {
   bar.append(posEl);
   const loopBadge = h("span", `badge${S.loopingId ? " on" : ""}`, "LOOP");
   const prBadge = h("span", `badge${S.preRollEnabled ? " on" : ""}`, "PRE-ROLL");
-  bar.append(loopBadge, prBadge);
+  // The engine badge doubles as M4's fallback toggle. A button rather than
+  // a key: choosing an engine is setup, not something done mid-passage.
+  const seamless = S.engineKind === "worklet";
+  const engBtn = h("button", `badge toggle${seamless ? " on" : ""}`, "SEAMLESS");
+  engBtn.type = "button";
+  engBtn.title = seamless
+    ? "gapless loops, pitch held down to 0.50× — click for the basic engine"
+    : "basic engine: a gap at the loop seam — click for seamless playback";
+  engBtn.addEventListener("click", () => {
+    engBtn.blur(); // keys stay global; a focus ring here would eat Space
+    void toggleEngine();
+  });
+  bar.append(loopBadge, prBadge, engBtn);
   const msg = h("span", `msg${S.messageIsError ? " error" : ""}`, S.message);
   bar.append(msg);
   // Far right, and the only thing on screen that advertises a key at all.
@@ -1528,7 +1640,11 @@ async function boot(): Promise<void> {
   S = {
     doc,
     app: appState,
+    ctx: null,
     engine: null,
+    // The preference, until arming proves what this browser can actually
+    // give us. Rendering it now keeps the badge from flipping on arm.
+    engineKind: appState.engine ?? "worklet",
     duration: doc.sources.find((s) => s.id === selectedExc?.sourceId)?.duration ?? null,
     loadedSourceId: null,
     files: new Map(),
@@ -1587,6 +1703,7 @@ if (import.meta.env.DEV) {
       loopingId: S.loopingId,
       loadedSourceId: S.loadedSourceId,
       duration: S.duration,
+      engine: S.engineKind,
       paused: S.engine?.paused ?? null,
       region: S.doc.excerpts.find((e) => e.id === S.selectedId)?.region ?? null,
       waveformOpen: S.waveformOpen,

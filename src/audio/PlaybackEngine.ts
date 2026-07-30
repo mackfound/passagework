@@ -5,8 +5,9 @@
  * M1: MediaElementEngine — <audio> + preservesPitch, routed through a
  *     MediaElementAudioSourceNode so the Web Audio graph exists for the
  *     metronome later. Pitch-preserved, but the loop seam has a seek hiccup.
- * M4: WorkletEngine — gapless and pitch-preserved, behind this same
- *     interface, with a toggle to fall back.
+ * M4: WorkletEngine — decoded PCM through a WSOLA AudioWorklet. Gapless
+ *     and pitch-preserved, behind this same interface, with a toggle to
+ *     fall back.
  */
 
 import type { Region, Seconds } from "../core";
@@ -38,6 +39,8 @@ export interface PlaybackEngine {
   setRate(rate: number): void;
   /** Source-time seconds, not wall-time. Poll via rAF, never `timeupdate` (spec §11). */
   getPosition(): Seconds;
+  /** Transport state. The one keypress that both starts and stops needs it. */
+  readonly paused: boolean;
   onTick(cb: (seconds: Seconds) => void): Unsubscribe;
   /** Fires each time playback wraps from loop end to start — rep counting (spec §7). */
   onLoopWrap(cb: () => void): Unsubscribe;
