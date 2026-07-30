@@ -74,7 +74,8 @@ export interface TempoInfo {
 export interface Excerpt {
   id: string;
   label: string;
-  shortLabel?: string;
+  /** What the card shows. Falls back to `label` when absent. */
+  title?: string;
   /**
    * Explicit key binding (e.g. "1", "d"). Optional: unbound excerpts are
    * reachable by prev/next. Explicit rather than positional so reordering

@@ -247,7 +247,7 @@ async function startLoop(exc: Excerpt): Promise<void> {
   if (!exc.region) {
     S.loopingId = null;
     S.engine.setLoop(null);
-    say(`"${exc.shortLabel ?? exc.label}" is untimed — Space to play, tap I / O to mark it`);
+    say(`"${exc.title ?? exc.label}" is untimed — Space to play, tap I / O to mark it`);
     render();
     return;
   }
@@ -299,7 +299,7 @@ async function ensureSourceLoaded(exc: Excerpt): Promise<boolean> {
     const resolved = await resolveAudio(source.fileRef);
     if (!resolved.ok) {
       const why = {
-        "no-handle": `no recording linked for "${exc.shortLabel ?? exc.label}" yet`,
+        "no-handle": `no recording linked for "${exc.title ?? exc.label}" yet`,
         "permission-denied": "permission to the recording was denied",
         "file-missing": "the recording moved or was deleted",
       }[resolved.reason];
@@ -608,7 +608,7 @@ async function completeLink(
   } else if (!persistent) {
     say(`linked for this session: ${file.name} — re-link after a restart`, true);
   } else {
-    say(`linked to "${exc.shortLabel ?? exc.label}": ${file.name}`);
+    say(`linked to "${exc.title ?? exc.label}": ${file.name}`);
   }
   render();
 }
@@ -854,37 +854,37 @@ function openEditor(excerptId: string | null): void {
  * applying when the input is bad — the caller shows it without re-rendering
  * (a render would wipe the form the user is still fixing).
  */
-function saveExcerptFields(rawLabel: string, rawShort: string, rawHotkey: string): string | null {
+function saveExcerptFields(rawLabel: string, rawTitle: string, rawHotkey: string): string | null {
   const label = rawLabel.trim();
-  const shortLabel = rawShort.trim();
+  const title = rawTitle.trim();
   const hotkey = rawHotkey.trim().toLowerCase();
   if (!label) return "label is required";
   if (hotkey.length > 1) return "hotkey must be a single key";
   if (hotkey && isReservedKey(hotkey)) return `"${hotkey}" is reserved by the app keymap`;
   const clash = S.doc.excerpts.find((e) => e.hotkey === hotkey && e.id !== S.editor.excerptId);
-  if (hotkey && clash) return `"${hotkey}" is already used by "${clash.shortLabel ?? clash.label}"`;
+  if (hotkey && clash) return `"${hotkey}" is already used by "${clash.title ?? clash.label}"`;
 
   if (S.editor.excerptId === null) {
     const source = makePlaceholderSource();
     S.doc.sources.push(source);
     const exc = makeExcerpt(
-      { label, ...(shortLabel ? { shortLabel } : {}), ...(hotkey ? { hotkey } : {}) },
+      { label, ...(title ? { title } : {}), ...(hotkey ? { hotkey } : {}) },
       source.id,
     );
     S.doc.excerpts.push(exc);
     S.selectedId = exc.id;
     S.app.selectedExcerptId = exc.id;
     persistApp();
-    say(`added "${shortLabel || label}" — press L to link its recording`);
+    say(`added "${title || label}" — press L to link its recording`);
   } else {
     const exc = S.doc.excerpts.find((e) => e.id === S.editor.excerptId);
     if (!exc) return "excerpt no longer exists";
     exc.label = label;
-    if (shortLabel) exc.shortLabel = shortLabel;
-    else delete exc.shortLabel;
+    if (title) exc.title = title;
+    else delete exc.title;
     if (hotkey) exc.hotkey = hotkey;
     else delete exc.hotkey;
-    say(`saved "${shortLabel || label}"`);
+    say(`saved "${title || label}"`);
   }
   persistDoc();
   S.editor.open = false;
@@ -910,7 +910,7 @@ function deleteExcerptFlow(excerptId: string): void {
   }
   persistDoc();
   S.editor.open = false;
-  say(`deleted "${gone?.shortLabel ?? gone?.label ?? "excerpt"}"`);
+  say(`deleted "${gone?.title ?? gone?.label ?? "excerpt"}"`);
   render();
   void renderImage();
 }
@@ -1072,7 +1072,7 @@ async function armAudio(): Promise<void> {
     }
   } else {
     const why = {
-      "no-handle": `no recording linked for "${exc.shortLabel ?? exc.label}" yet`,
+      "no-handle": `no recording linked for "${exc.title ?? exc.label}" yet`,
       "permission-denied": "permission to the recording was denied",
       "file-missing": "the recording moved or was deleted",
     }[resolved.reason];
@@ -1225,7 +1225,7 @@ function render(): void {
     if (e.id === S.loopingId) card.classList.add("looping");
     const top = h("div");
     if (e.hotkey) top.append(h("span", "key", e.hotkey.toUpperCase()));
-    top.append(h("span", "short", e.shortLabel ?? e.label));
+    top.append(h("span", "short", e.title ?? e.label));
     card.append(top);
     const detail = h("div", "detail");
     detail.append(h("span", undefined, e.label));
@@ -1425,7 +1425,7 @@ function renderEditorModal(): void {
   };
   // Title first: it is what the excerpt card shows and what you reach for
   // during practice. `field` appends in call order, so this is the order.
-  const shortIn = field("title", editing?.shortLabel ?? "", "IV/2");
+  const titleIn = field("title", editing?.title ?? "", "IV/2");
   const labelIn = field("label", editing?.label ?? "", "Mvt IV — Fig 2, mm. 6–12");
   const hotkeyIn = field(
     "hotkey",
@@ -1460,7 +1460,7 @@ function renderEditorModal(): void {
   form.append(actions);
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
-    const err = saveExcerptFields(labelIn.value, shortIn.value, hotkeyIn.value);
+    const err = saveExcerptFields(labelIn.value, titleIn.value, hotkeyIn.value);
     if (err) errEl.textContent = err; // leave the form as typed
   });
   modal.append(form);
@@ -1471,7 +1471,7 @@ function renderEditorModal(): void {
   });
   backdrop.append(modal);
   app.append(backdrop);
-  shortIn.focus(); // the top field, whichever one that is
+  titleIn.focus(); // the top field, whichever one that is
 }
 
 function renderLinkModal(): void {
@@ -1563,7 +1563,7 @@ async function renderImage(): Promise<void> {
 function attachImage(exc: Excerpt, role: "part" | "score"): void {
   const replacing = exc.assets.some((a) => a.role === role);
   openLinkModal(
-    `${replacing ? "replace the" : "attach a"} ${role} image for "${exc.shortLabel ?? exc.label}"`,
+    `${replacing ? "replace the" : "attach a"} ${role} image for "${exc.title ?? exc.label}"`,
     { kind: "image", excerptId: exc.id, role },
   );
 }
@@ -1660,7 +1660,7 @@ function onKeydown(ev: KeyboardEvent): void {
     case "linkAudio": {
       const exc = selected();
       if (!exc) break;
-      const name = exc.shortLabel ?? exc.label;
+      const name = exc.title ?? exc.label;
       openLinkModal(
         isLinked(sourceOf(exc))
           ? `replace the recording for "${name}"`

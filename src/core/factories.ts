@@ -40,7 +40,7 @@ export function makePlaceholderSource(): Source {
 
 export interface ExcerptFields {
   label: string;
-  shortLabel?: string;
+  title?: string;
   hotkey?: string;
 }
 
@@ -49,7 +49,7 @@ export function makeExcerpt(fields: ExcerptFields, sourceId: string): Excerpt {
   return {
     id: `exc_${shortId()}`,
     label: fields.label,
-    ...(fields.shortLabel ? { shortLabel: fields.shortLabel } : {}),
+    ...(fields.title ? { title: fields.title } : {}),
     ...(fields.hotkey ? { hotkey: fields.hotkey } : {}),
     sourceId,
     region: null,

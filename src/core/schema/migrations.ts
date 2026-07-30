@@ -26,7 +26,38 @@ export type Migration = (doc: RawDoc) => RawDoc;
  */
 const v1ToV2: Migration = (doc) => ({ ...doc });
 
-export const migrations: readonly Migration[] = [v1ToV2];
+/**
+ * v2 → v3: `shortLabel` becomes `title`.
+ *
+ * Same field, same meaning, better name. `shortLabel` described the string's
+ * shape by reference to `label` — "the short one" — where what the field
+ * actually is, is the excerpt's name: what the card shows and what you read
+ * across the room mid-passage. §4 forbids changing what a field *means*,
+ * which this does not; renaming a key while preserving its meaning is what
+ * this array is for, and the UI calling it something the storage doesn't
+ * would just teach the old model forever.
+ */
+const v2ToV3: Migration = (doc) => {
+  const excerpts = doc["excerpts"];
+  if (!Array.isArray(excerpts)) return { ...doc };
+  return {
+    ...doc,
+    excerpts: excerpts.map((raw) => {
+      if (typeof raw !== "object" || raw === null) return raw;
+      const next = { ...(raw as RawDoc) };
+      const old = next["shortLabel"];
+      delete next["shortLabel"];
+      // Adopt the old value unless a title is already there. A blank one is
+      // dropped rather than carried: absent is how "no title" is spelled.
+      if (next["title"] === undefined && typeof old === "string" && old !== "") {
+        next["title"] = old;
+      }
+      return next;
+    }),
+  };
+};
+
+export const migrations: readonly Migration[] = [v1ToV2, v2ToV3];
 
 export const CURRENT_VERSION = migrations.length + 1;
 

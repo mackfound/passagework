@@ -20,15 +20,15 @@ describe("makeEmptyProject", () => {
 describe("makeExcerpt", () => {
   it("omits empty optional fields entirely rather than storing them blank", () => {
     const exc = makeExcerpt({ label: "Mvt I" }, "src_x");
-    expect("shortLabel" in exc).toBe(false);
+    expect("title" in exc).toBe(false);
     expect("hotkey" in exc).toBe(false);
     expect(exc.region).toBeNull();
     expect(exc.sourceId).toBe("src_x");
   });
 
   it("keeps provided optional fields", () => {
-    const exc = makeExcerpt({ label: "Mvt I", shortLabel: "I", hotkey: "4" }, "src_x");
-    expect(exc.shortLabel).toBe("I");
+    const exc = makeExcerpt({ label: "Mvt I", title: "I", hotkey: "4" }, "src_x");
+    expect(exc.title).toBe("I");
     expect(exc.hotkey).toBe("4");
   });
 });

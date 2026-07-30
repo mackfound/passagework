@@ -33,7 +33,7 @@ export function makeSeedProject(): ProjectDoc {
       {
         id: "exc_iv_fig2",
         label: "Mvt IV — Fig 2, mm. 6–12",
-        shortLabel: "IV/2",
+        title: "IV/2",
         hotkey: "1",
         sourceId: SEED_SOURCE_ID,
         region: null,
@@ -48,7 +48,7 @@ export function makeSeedProject(): ProjectDoc {
       {
         id: "exc_i_fig5",
         label: "Mvt I — Fig 5, mm. 9–23",
-        shortLabel: "I/5",
+        title: "I/5",
         hotkey: "2",
         sourceId: SEED_SOURCE_ID,
         region: null,
@@ -63,7 +63,7 @@ export function makeSeedProject(): ProjectDoc {
       {
         id: "exc_iv_fig9",
         label: "Mvt IV — 14 before Fig 9 → Fig 9",
-        shortLabel: "IV/9−14",
+        title: "IV/9−14",
         hotkey: "3",
         sourceId: SEED_SOURCE_ID,
         region: null,
