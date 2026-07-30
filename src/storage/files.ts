@@ -43,10 +43,33 @@ export async function resolveAudio(ref: FileRef): Promise<ResolvedAudio> {
 
 export const AUDIO_EXTENSIONS = [".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus"];
 
-export function looksLikeAudio(file: File): boolean {
-  if (file.type.startsWith("audio/")) return true;
+/**
+ * Video containers count as recordings. <audio> decodes the audio track of
+ * an mp4/mov/webm and ignores the video, and a recording ripped from video
+ * is an ordinary way to end up with one — rejecting them was the sniff
+ * being narrower than the engine, not a real constraint.
+ */
+export const VIDEO_EXTENSIONS = [".mp4", ".m4v", ".mov", ".webm", ".mkv"];
+
+let probeEl: HTMLAudioElement | null = null;
+
+/**
+ * Cheap "is this plausibly playable" sniff for drops. Deliberately generous:
+ * its only job is to catch an obviously wrong drop (a PDF onto the audio
+ * slot), because the engine is the actual arbiter and reports a real error
+ * when a file that gets past here still won't decode. Widening a false
+ * negative costs one bad message; a false negative blocks a valid file
+ * outright, which is the worse failure.
+ */
+export function looksPlayable(file: File): boolean {
+  if (file.type.startsWith("audio/") || file.type.startsWith("video/")) return true;
   const name = file.name.toLowerCase();
-  return AUDIO_EXTENSIONS.some((ext) => name.endsWith(ext));
+  if ([...AUDIO_EXTENSIONS, ...VIDEO_EXTENSIONS].some((ext) => name.endsWith(ext))) return true;
+  // Unrecognised extension: ask the element that will do the playing.
+  // "" is a definite no; "maybe" and "probably" both pass.
+  if (!file.type) return false;
+  probeEl ??= new Audio();
+  return probeEl.canPlayType(file.type) !== "";
 }
 
 /**
@@ -77,13 +100,18 @@ export async function audioFromDataTransfer(
   }
   file ??= item.getAsFile();
   if (!file) return null;
-  if (!looksLikeAudio(file)) return { error: `"${file.name}" doesn't look like an audio file` };
+  if (!looksPlayable(file)) return { error: `"${file.name}" isn't a media file — drop audio or video` };
   return { file, handle };
 }
 
 /**
- * Show the audio file picker. Returns null if the user cancelled.
+ * Show the recording picker. Returns null if the user cancelled.
  * Requires a user gesture. As with drops, the caller persists the handle.
+ *
+ * Nothing sniffs the result: choosing a file in a native dialog is an
+ * explicit act, and "All Files" stays available on purpose, so the picker
+ * is deliberately a superset of what drops accept. It must never be the
+ * *only* way in — a file the picker takes and a drop refuses is a bug.
  */
 export async function pickAudio(): Promise<{ file: File; handle: FileSystemFileHandle } | null> {
   let handle: FileSystemFileHandle;
@@ -91,9 +119,10 @@ export async function pickAudio(): Promise<{ file: File; handle: FileSystemFileH
     [handle] = (await window.showOpenFilePicker({
       types: [
         {
-          description: "Audio",
+          description: "Recording",
           accept: {
-            "audio/*": [".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus"],
+            "audio/*": AUDIO_EXTENSIONS,
+            "video/*": VIDEO_EXTENSIONS,
           },
         },
       ],

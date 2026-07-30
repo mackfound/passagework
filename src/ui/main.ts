@@ -429,7 +429,19 @@ async function completeLink(
   pruneOrphanSources();
 
   S.files.set(source.id, file);
-  await loadIntoEngine(file, source.id);
+  try {
+    await loadIntoEngine(file, source.id);
+  } catch {
+    // The drop sniff is a courtesy; this is the real verdict. Surface it
+    // instead of dying as an unhandled rejection, and drop loadedSourceId
+    // so the next trigger reloads — the engine's element is now pointing
+    // at the file that just failed.
+    S.files.delete(source.id);
+    S.loadedSourceId = null;
+    S.linkModal.hint = `"${file.name}" won't play in this browser — try another file`;
+    render();
+    return;
+  }
   persistDoc();
   S.linkModal.open = false;
   // Timings are kept on a recording swap — right when re-pointing at the
@@ -1077,14 +1089,14 @@ function renderLinkModal(): void {
   modal.append(h("div", "modal-hint", S.linkModal.hint));
 
   const zone = h("div", "dropzone");
-  zone.append(h("div", "dropzone-big", isAudio ? "drop an audio file here" : "drop an image here"));
+  zone.append(h("div", "dropzone-big", isAudio ? "drop a recording here" : "drop an image here"));
   zone.append(
     h(
       "div",
       "dropzone-small",
       isAudio
-        ? "or press Enter to browse — Esc to cancel"
-        : "PNG, JPG, WebP — or press Enter to browse — Esc to cancel",
+        ? "audio or video — or press Enter to browse — Esc to cancel"
+        : "PNG, JPG, WebP, GIF, AVIF — or press Enter to browse — Esc to cancel",
     ),
   );
   zone.addEventListener("dragover", (ev) => {

@@ -23,7 +23,9 @@ async function fileToBase64(file: File): Promise<string> {
   return btoa(bin);
 }
 
-export const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"];
+// Everything an <img> renders in Chromium. Same rule as looksPlayable in
+// files.ts: the sniff should never be narrower than what actually displays.
+export const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"];
 
 export function looksLikeImage(file: File): boolean {
   if (file.type.startsWith("image/")) return true;
@@ -61,7 +63,7 @@ export async function pickImage(assetKey: string): Promise<AssetData | null> {
   try {
     [handle] = (await window.showOpenFilePicker({
       types: [
-        { description: "Score image", accept: { "image/*": [".png", ".jpg", ".jpeg", ".webp"] } },
+        { description: "Score image", accept: { "image/*": IMAGE_EXTENSIONS } },
       ],
       multiple: false,
     })) as [FileSystemFileHandle];
