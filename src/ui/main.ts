@@ -1295,11 +1295,29 @@ function render(): void {
  * here — a legend that drifts from the keymap is worse than none, and a
  * test in core/ fails the build if the two disagree.
  */
+/**
+ * The corner "×". Absolutely placed so it costs the dialog no layout, and
+ * it goes in first: with Escape and the backdrop already closing these, it
+ * is the affordance for people who look for one rather than a new rule to
+ * learn, so it should never be what the eye lands on.
+ */
+function closeButton(modal: HTMLElement, onClose: () => void): void {
+  const btn = h("button", "modal-close", "×");
+  btn.type = "button";
+  btn.setAttribute("aria-label", "close");
+  btn.addEventListener("click", () => {
+    btn.blur(); // keys stay global; a focus ring here would eat Space
+    onClose();
+  });
+  modal.append(btn);
+}
+
 function renderHelpModal(): void {
   const backdrop = h("div", "modal-backdrop");
   const modal = h("div", "modal help");
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-label", "Keyboard shortcuts");
+  closeButton(modal, toggleHelp);
   modal.append(h("div", "modal-title", "Keys"));
 
   const list = h("div", "keylist");
@@ -1322,6 +1340,7 @@ function renderLibraryModal(): void {
   const modal = h("div", "modal");
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-label", "Projects");
+  closeButton(modal, closeDialogs);
   modal.append(h("div", "modal-title", "Projects"));
 
   const list = h("div", "projlist");
@@ -1389,6 +1408,7 @@ function renderEditorModal(): void {
   const modal = h("div", "modal");
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-label", editing ? "Edit excerpt" : "New excerpt");
+  closeButton(modal, closeDialogs);
   modal.append(h("div", "modal-title", editing ? "Edit excerpt" : "New excerpt"));
 
   const form = h("form", "excform");
@@ -1403,8 +1423,10 @@ function renderEditorModal(): void {
     form.append(wrap);
     return input;
   };
+  // Title first: it is what the excerpt card shows and what you reach for
+  // during practice. `field` appends in call order, so this is the order.
+  const shortIn = field("title", editing?.shortLabel ?? "", "IV/2");
   const labelIn = field("label", editing?.label ?? "", "Mvt IV — Fig 2, mm. 6–12");
-  const shortIn = field("short label", editing?.shortLabel ?? "", "IV/2 (card title)");
   const hotkeyIn = field(
     "hotkey",
     editing?.hotkey ?? nextFreeHotkey(S.doc.excerpts) ?? "",
@@ -1449,7 +1471,7 @@ function renderEditorModal(): void {
   });
   backdrop.append(modal);
   app.append(backdrop);
-  labelIn.focus();
+  shortIn.focus(); // the top field, whichever one that is
 }
 
 function renderLinkModal(): void {

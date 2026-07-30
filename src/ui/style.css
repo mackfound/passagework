@@ -425,6 +425,7 @@ button.badge:hover {
 }
 
 .modal {
+  position: relative; /* anchors .modal-close */
   background: var(--panel);
   border: 1px solid #2a2a33;
   border-radius: 14px;
@@ -442,6 +443,26 @@ button.badge:hover {
 .modal-title {
   font-size: 1.4rem;
   font-weight: 700;
+}
+
+/* Out of the flex flow entirely, so adding it moved nothing. Dim until
+   reached for — Escape and the backdrop are still the fast ways out. */
+.modal-close {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.7rem;
+  padding: 0 0.35rem;
+  font-family: inherit;
+  font-size: 1.5rem;
+  line-height: 1.4;
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.modal-close:hover {
+  color: var(--fg);
 }
 
 .modal-hint {
