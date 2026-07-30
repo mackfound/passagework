@@ -19,8 +19,11 @@ export function makeSeedProject(): ProjectDoc {
     name: "Fall 2026 Auditions",
     sources: [
       {
+        // label stays empty until a file is linked: it always holds the
+        // linked filename (ui shows "no recording" while it's empty),
+        // matching makePlaceholderSource in factories.ts.
         id: SEED_SOURCE_ID,
-        label: "Dvořák 9 — recording to be linked",
+        label: "",
         fileRef: { kind: "filename", name: "" },
         duration: null,
         sampleRate: null,

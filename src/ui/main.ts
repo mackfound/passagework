@@ -748,10 +748,19 @@ async function loadIntoEngine(file: File, sourceId: string): Promise<void> {
   S.duration = loaded.duration;
   S.loadedSourceId = sourceId;
   const source = S.doc.sources.find((s) => s.id === sourceId);
-  if (source && source.duration !== loaded.duration) {
+  if (!source) return;
+  let dirty = false;
+  if (source.duration !== loaded.duration) {
     source.duration = loaded.duration;
-    persistDoc();
+    dirty = true;
   }
+  // A source's label is its linked filename. Sources linked before that
+  // rule existed (M1 set only fileRef) self-heal here on first load.
+  if (source.label !== file.name) {
+    source.label = file.name;
+    dirty = true;
+  }
+  if (dirty) persistDoc();
 }
 
 /**
@@ -863,11 +872,13 @@ function render(): void {
         ? h("span", undefined, `${fmtTime(e.region.start)}–${fmtTime(e.region.end)}`)
         : h("span", "untimed", "untimed"),
     );
-    // which recording this card plays — sources differ per excerpt now
+    // which recording this card plays — sources differ per excerpt now.
+    // The label is the linked filename; a linked source without one (linked
+    // by an older build, not yet self-healed by a load) falls back honestly.
     const src = sourceOf(e);
     detail.append(
       isLinked(src)
-        ? h("span", "srcname", src!.label)
+        ? h("span", "srcname", src!.label || "recording linked")
         : h("span", "srcname missing", "no recording"),
     );
     for (const use of e.assets) {
