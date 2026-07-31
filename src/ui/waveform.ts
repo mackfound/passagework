@@ -130,7 +130,7 @@ export function createWaveform(deps: WaveformDeps): WaveformHandle {
 
     const mid = height / 2;
     const cols = sampleWindow(deps.env, deps.view, Math.floor(width));
-    ctx.strokeStyle = cssVar(root, "--dim", "#9a9aa6");
+    ctx.strokeStyle = cssVar(root, "--dim", "#9b9797");
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let x = 0; x < cols.min.length; x++) {
@@ -156,12 +156,15 @@ export function createWaveform(deps: WaveformDeps): WaveformHandle {
     if (region) {
       const x0 = timeToX(region.start, deps.view, width);
       const x1 = timeToX(region.end, deps.view, width);
-      const loop = cssVar(root, "--loop", "#4ade80");
-      ctx.fillStyle = loop;
+      // Gold, not green: the region is authored config — the same thing the
+      // selected card's border marks — and green is reserved for sound
+      // actually moving, which here is the playhead below.
+      const edge = cssVar(root, "--gold-edge", "#b68235");
+      ctx.fillStyle = edge;
       ctx.globalAlpha = 0.14;
       ctx.fillRect(x0, 0, x1 - x0, height);
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = loop;
+      ctx.strokeStyle = edge;
       ctx.lineWidth = 2;
       for (const x of [x0, x1]) {
         ctx.beginPath();
@@ -177,7 +180,7 @@ export function createWaveform(deps: WaveformDeps): WaveformHandle {
     const pos = deps.position();
     if (pos >= deps.view.start && pos <= deps.view.end) {
       const x = timeToX(pos, deps.view, width);
-      ctx.strokeStyle = cssVar(root, "--accent", "#ffb454");
+      ctx.strokeStyle = cssVar(root, "--green", "#8ecf9e");
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(x, 0);

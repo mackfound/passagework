@@ -2,18 +2,120 @@
  * Spec §8: sparse, high-contrast, read from three feet away while holding
  * an instrument. The score image dominates; everything else is chrome.
  * Dark background — this sits next to a music stand under a lamp.
+ *
+ * The type and colour system below is deliberately small: two faces at
+ * three sizes, three colour roles. Nothing is bold — emphasis is caps,
+ * italic, or colour. Adding a fourth size or a fourth role is how this
+ * stops being a system, so don't.
  */
+
+/* ---- faces ----
+ * Vendored under public/fonts (OFL 1.1, see public/fonts/OFL.txt) rather
+ * than fetched from a CDN: the app makes no network requests at runtime
+ * and must keep working offline and in 2035 (§1).
+ *
+ * Both families are variable, so one file covers the whole weight range
+ * and there is no separate 600 download. The latin-ext pair is a second
+ * file the browser fetches only if a glyph needs it — which it does the
+ * moment a label says Dvořák.
+ */
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Lora";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/lora-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Lora";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/lora-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Lora";
+  font-style: italic;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/lora-italic-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Lora";
+  font-style: italic;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/lora-italic-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
 
 :root {
   color-scheme: dark;
-  --bg: #0e0e12;
-  --panel: #17171d;
-  --fg: #ececf1;
-  --dim: #9a9aa6;
-  --accent: #ffb454;
-  --loop: #4ade80;
-  --warn: #f87171;
-  --focus: #60a5fa;
+
+  /* ground / ink */
+  --bg: #141310;
+  --footnote-bg: #100f0d;
+  --hairline: rgb(215 211 211 / 13%);
+  --hairline-strong: rgb(215 211 211 / 22%);
+  --fg: #d7d3d3;
+  --dim: #9b9797;
+  /* Dimmest ink permitted, and only for marks that are never clickable —
+     the chevron, the stopped dot's ring. Text never goes below --dim. */
+  --faint: #7d7979;
+
+  /* gold — the accent. Stroke and figures only; no filled buttons. */
+  --gold: #e1ad66;
+  --gold-edge: #b68235;
+  --gold-tint: rgb(182 130 53 / 12%);
+
+  /* green — transport only. If it isn't about sound moving, it isn't green. */
+  --green: #8ecf9e;
+  --green-tint: rgb(142 207 158 / 10%);
+  --green-tint-strong: rgb(142 207 158 / 18%);
+
+  --hover-tint: rgb(215 211 211 / 6%);
+
+  /* the three sizes; there is no fourth */
+  --figure: 26px;
+  --figure-anchor: 30px;
+  --text: 13.5px;
+  --label: 10.5px;
 }
 
 * {
@@ -24,7 +126,9 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font-family: system-ui, sans-serif;
+  font-family: "Lora", Georgia, serif;
+  font-size: var(--text);
+  font-weight: 400;
   height: 100vh;
   overflow: hidden;
 }
@@ -37,7 +141,7 @@ body {
 
 /* Visible focus rings are load-bearing (§8) */
 :focus-visible {
-  outline: 3px solid var(--focus);
+  outline: 2px solid var(--gold-edge);
   outline-offset: 2px;
 }
 
@@ -48,173 +152,248 @@ body {
   }
 }
 
-/* ---- status bar ---- */
+/* ---- the three type roles ----
+ * Figure and Label are utilities applied by name; Text is the body default
+ * above, so only the places that need to climb back to it say so.
+ */
 
-/* brand mark: present but quiet — the project name is the louder label */
-.status .brand {
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
+.t-figure {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-weight: 400;
+  font-size: var(--figure);
+  font-feature-settings: "tnum";
+  line-height: 1.1;
+}
+
+.t-label {
+  font-family: "Lora", Georgia, serif;
+  font-weight: 600;
+  font-size: var(--label);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- header: one row, no second line, no status text (§3c) ---- */
+
+.header {
+  flex: none;
+  height: 52px;
+  padding: 0 22px;
+  border-bottom: 1px solid var(--hairline);
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+
+.header .brand {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-weight: 600;
+  font-size: var(--label);
+  letter-spacing: 0.26em;
   text-transform: uppercase;
   color: var(--dim);
   flex: none;
 }
 
-.status {
+/* session name + chevron read as one target, so they sit in one button */
+.header .session {
   display: flex;
   align-items: center;
-  gap: 1.5rem;
-  padding: 0.6rem 1.2rem;
-  background: var(--panel);
-  font-size: 1.05rem;
-  flex: none;
+  gap: 8px;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--fg);
+  cursor: pointer;
+  min-width: 0;
 }
 
-.status .project {
-  color: var(--dim);
+.header .session-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: none;
-  border: none;
-  font: inherit;
-  cursor: pointer;
-  padding: 0.2rem 0.4rem;
-  border-radius: 6px;
 }
 
-.status .project:hover {
-  color: var(--fg);
-  background: var(--bg);
+.header .session:hover .session-name {
+  color: var(--gold);
 }
 
-/* pushed to the far right; the app's only visible mention of a key */
-.status .helpbtn {
-  margin-left: auto;
+/* 9×6 triangle drawn in CSS: no glyph to fall back on, no icon font */
+.chevron {
   flex: none;
-  background: none;
-  border: 1px solid var(--dim);
-  color: var(--dim);
+  width: 9px;
+  height: 6px;
+  background: var(--faint);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+.header .session:hover .chevron {
+  background: var(--gold);
+}
+
+.header .spacer {
+  flex: 1;
+}
+
+.header .session-edit {
   font: inherit;
-  line-height: 1;
-  cursor: pointer;
-  width: 1.9rem;
-  height: 1.9rem;
-  border-radius: 50%;
-}
-
-.status .helpbtn:hover {
+  font-size: var(--text);
+  background: var(--footnote-bg);
   color: var(--fg);
-  border-color: var(--fg);
-}
-
-/* two columns: keys right-aligned against their descriptions */
-.modal.help .keylist {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.55rem 1rem;
-  align-items: baseline;
-  text-align: left;
-  margin: 0.4rem 0 0.2rem;
-  overflow-y: auto;
-  min-height: 0; /* let it shrink in the flex column rather than push the modal open */
-}
-
-.modal.help kbd {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.9rem;
-  color: var(--fg);
-  background: var(--bg);
-  border: 1px solid #33333d;
-  border-radius: 5px;
-  padding: 0.15rem 0.45rem;
-  white-space: nowrap;
-  justify-self: end;
-}
-
-.modal.help .keylist span {
-  color: var(--dim);
-}
-
-.status .projmenu {
-  background: none;
-  border: none;
-  color: var(--dim);
-  font: inherit;
-  cursor: pointer;
-  padding: 0.2rem 0.35rem;
-  border-radius: 6px;
-  margin-left: -1.1rem; /* sit tight against the name despite the bar's gap */
-}
-
-.status .projmenu:hover {
-  color: var(--fg);
-  background: var(--bg);
-}
-
-.status .project-edit {
-  font: inherit;
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  padding: 0.15rem 0.4rem;
+  border: 1px solid var(--gold-edge);
+  border-radius: 2px;
+  padding: 3px 7px;
   width: min(18rem, 30vw);
 }
 
-/* Rate: a visible number, always (§8) — biggest thing in the bar */
-.status .rate {
-  font-size: 1.9rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--accent);
-  min-width: 5.5ch;
-  text-align: right;
+/* the 1px×18px rule between the rate and the help glyph */
+.header .rule {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  background: var(--hairline);
 }
 
-.status .pos {
-  font-variant-numeric: tabular-nums;
-  color: var(--dim);
-  min-width: 16ch;
-}
-
-.badge {
-  padding: 0.15rem 0.6rem;
-  border-radius: 4px;
-  font-size: 0.85rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  border: 1px solid var(--dim);
-  color: var(--dim);
-}
-
-.badge.on {
-  border-color: var(--loop);
-  color: var(--loop);
-}
-
-/* The engine badge is the one that's clickable; it reads as a badge and
-   behaves as a button, so it needs the button reset and an affordance. */
-button.badge {
-  font-family: inherit;
+.header .helpbtn {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--hairline-strong);
   background: none;
+  color: var(--dim);
+  font-family: "Lora", Georgia, serif;
+  font-weight: 600;
+  font-size: var(--label);
+  line-height: 1;
+  padding: 0;
   cursor: pointer;
 }
 
-button.badge:hover {
-  border-color: var(--fg);
-  color: var(--fg);
+.header .helpbtn:hover {
+  color: var(--gold);
+  border-color: var(--gold-edge);
 }
 
-.status .msg {
-  margin-left: auto;
-  color: var(--accent);
+/* ---- toggle strip: three independent toggles, not a radio group ---- */
+
+.toggles {
+  flex: none;
+  display: flex;
+  height: 26px;
+  border: 1px solid rgb(215 211 211 / 20%);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.toggles button {
+  display: flex;
+  align-items: center;
+  padding: 0 13px;
+  border: none;
+  border-left: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--dim);
+  font-family: "Lora", Georgia, serif;
   font-weight: 600;
+  font-size: var(--label);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.toggles button:first-child {
+  border-left: none;
+}
+
+.toggles button:hover {
+  background: var(--hover-tint);
+}
+
+/* Green is transport state, so it is the *on* colour and nothing else. */
+.toggles button.on {
+  color: var(--green);
+  background: var(--green-tint);
+}
+
+.toggles button.on:hover,
+.toggles button:active {
+  background: var(--green-tint-strong);
+}
+
+/* the ring would otherwise be clipped by the strip's overflow:hidden */
+.toggles button:focus-visible {
+  outline-offset: -2px;
+}
+
+/* ---- rate: always a visible number (§8) ---- */
+
+.rate {
+  position: relative;
+  flex: none;
+}
+
+.rate-figure {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-weight: 400;
+  font-size: var(--figure-anchor);
+  font-feature-settings: "tnum";
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--gold);
+  background: none;
+  border: none;
+  padding: 0;
+  /* fixed width so 0.75× → 1.00× never shifts the row */
+  min-width: 74px;
+  text-align: right;
+  cursor: pointer;
+}
+
+/* the ladder popover: stroke and figures, no fill (§2) */
+.rate-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 6;
+  background: var(--footnote-bg);
+  border: 1px solid var(--gold-edge);
+  border-radius: 2px;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.rate-menu button {
+  background: none;
+  border: none;
+  padding: 5px 16px;
+  font-family: "Lora", Georgia, serif;
+  font-weight: 600;
+  font-size: var(--label);
+  letter-spacing: 0.15em;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+  cursor: pointer;
   text-align: right;
 }
 
-.status .msg.error {
-  color: var(--warn);
+.rate-menu button:hover {
+  background: var(--gold-tint);
+  color: var(--fg);
+}
+
+.rate-menu button.current {
+  color: var(--gold);
 }
 
 /* ---- score stage ---- */
@@ -225,7 +404,7 @@ button.badge:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0.75rem;
+  padding: 14px 22px;
 }
 
 .stage img {
@@ -238,12 +417,9 @@ button.badge:hover {
 
 .stage .placeholder {
   color: var(--dim);
-  font-size: 1.3rem;
+  font-style: italic;
   text-align: center;
-  line-height: 2;
 }
-
-/* ---- region strip: loop position at a glance from across the room ---- */
 
 /* ---- waveform panel (M3) ----
  * Authoring surface, so it takes a fixed strip rather than competing with
@@ -254,9 +430,10 @@ button.badge:hover {
   flex: none;
   position: relative;
   height: 108px;
-  margin: 0.5rem 1.2rem 0;
-  background: var(--panel);
-  border-radius: 6px;
+  margin: 0 22px 10px;
+  background: var(--footnote-bg);
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
   overflow: hidden;
   touch-action: none; /* pointer drags must not scroll the page */
 }
@@ -282,16 +459,17 @@ button.badge:hover {
   align-items: center;
   justify-content: center;
   color: var(--dim);
-  font-size: 0.85rem;
+  font-style: italic;
   pointer-events: none;
 }
 
+/* ---- region strip: loop position at a glance from across the room ---- */
+
 .regionbar {
   flex: none;
-  height: 10px;
-  margin: 0 1.2rem;
-  background: var(--panel);
-  border-radius: 5px;
+  height: 3px;
+  margin: 0 22px;
+  background: var(--hairline);
   position: relative;
   overflow: hidden;
 }
@@ -300,12 +478,12 @@ button.badge:hover {
   position: absolute;
   inset: 0 auto 0 0;
   width: 0;
-  background: var(--loop);
-  border-radius: 5px;
+  background: var(--green);
 }
 
+/* pre-roll is not yet the passage, so it reads as accent rather than transport */
 .regionbar.preroll .fill {
-  background: var(--accent);
+  background: var(--gold);
 }
 
 /* ---- excerpt row ---- */
@@ -313,127 +491,302 @@ button.badge:hover {
 .excerpts {
   flex: none;
   display: flex;
-  gap: 0.75rem;
-  padding: 0.9rem 1.2rem 1.1rem;
+  gap: 10px;
+  padding: 14px 22px 16px;
   overflow-x: auto;
 }
 
 .excerpt {
-  background: var(--panel);
-  border: 2px solid transparent;
-  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
   color: var(--fg);
-  padding: 0.7rem 1rem;
-  min-width: 11rem;
+  padding: 11px 13px;
+  min-width: 13rem;
   text-align: left;
   font: inherit;
   cursor: pointer;
   flex: none;
 }
 
+/* Only the selected card is gold. Looping is reported by the footnote
+   strip's dot and state word, so it does not also colour the card. */
 .excerpt.selected {
-  border-color: var(--accent);
+  border-color: var(--gold-edge);
 }
 
-.excerpt.looping {
-  border-color: var(--loop);
-  box-shadow: 0 0 12px rgb(74 222 128 / 35%);
-}
-
-.excerpt .key {
-  display: inline-block;
-  background: var(--bg);
-  border: 1px solid var(--dim);
-  border-radius: 5px;
-  padding: 0.05rem 0.55rem;
-  font-size: 1.15rem;
-  font-weight: 700;
-  margin-right: 0.5rem;
-}
-
-.excerpt .short {
-  font-size: 1.25rem;
-  font-weight: 700;
-}
-
-.excerpt .detail {
-  margin-top: 0.3rem;
-  font-size: 0.85rem;
-  color: var(--dim);
+.excerpt-head {
   display: flex;
-  gap: 0.6rem;
   align-items: center;
+  gap: 9px;
 }
 
-.excerpt .untimed {
-  color: var(--warn);
-  font-weight: 600;
+.excerpt .chip {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 2px;
+  color: var(--dim);
+  /* the chip is a fixed box, so the label's tracking would push the glyph
+     off-centre; it is a single character and needs none */
+  letter-spacing: 0;
 }
 
-/* which recording the card plays — sources can differ per excerpt */
-.excerpt .srcname {
-  max-width: 11rem;
+.excerpt .title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.excerpt .srcname.missing {
-  color: var(--warn);
-}
-
-.excerpt .attach {
-  margin-top: 0.45rem;
-  display: flex;
-  gap: 0.4rem;
-}
-
-.excerpt .attach button {
-  font: inherit;
-  font-size: 0.8rem;
-  background: var(--bg);
+/* inline/file is a real distinction (§5) and must stay visible, but it is
+   reference material — pushed right, at Label, in secondary ink */
+.excerpt .assetchip {
+  margin-left: auto;
+  flex: none;
   color: var(--dim);
-  border: 1px solid var(--dim);
-  border-radius: 5px;
-  padding: 0.15rem 0.5rem;
+}
+
+.excerpt .locus {
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.excerpt .locus .sep {
+  margin: 0 6px;
+  color: var(--faint);
+}
+
+.excerpt .untimed {
+  color: var(--gold);
+  font-style: italic;
+}
+
+.excerpt .missing {
+  color: var(--gold);
+  font-style: italic;
+}
+
+/* excerpt-scoped messages land here rather than in the strip (§3b) */
+.excerpt .note {
+  border-left: 1px solid var(--gold-edge);
+  padding-left: 9px;
+  color: var(--dim);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.excerpt .actions {
+  display: flex;
+  gap: 6px;
+  padding-top: 9px;
+  border-top: 1px solid var(--hairline);
+}
+
+/* All three are equal weight; none is gold at rest. */
+.excerpt .actions button {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 4px;
+  background: none;
+  color: var(--fg);
+  font-family: "Lora", Georgia, serif;
+  font-weight: 600;
+  font-size: var(--label);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  line-height: 1;
   cursor: pointer;
 }
 
-.excerpt .attach button:hover {
-  color: var(--fg);
+.excerpt .actions button:hover {
+  background: var(--gold-tint);
+  border-color: var(--gold-edge);
 }
 
-/* asset mode badge: inline vs handle must be visible, not silent */
-.assetmode {
-  font-size: 0.7rem;
-  border: 1px solid var(--dim);
-  border-radius: 3px;
-  padding: 0 0.3rem;
+.excerpt.addcard {
+  min-width: 9rem;
+  border-style: dashed;
+  color: var(--dim);
+  align-items: center;
+  justify-content: center;
+}
+
+.excerpt.addcard:hover {
+  color: var(--gold);
+  border-color: var(--gold-edge);
+}
+
+/* ---- footnote strip: transport state and the newest message (§3) ---- */
+
+.footnote {
+  flex: none;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 22px;
+  background: var(--footnote-bg);
+  border-top: 1px solid var(--hairline);
+  cursor: pointer;
+}
+
+.footnote .dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--faint);
+}
+
+.footnote .dot.running {
+  background: var(--green);
+  box-shadow: none;
+}
+
+.footnote .state {
+  flex: none;
   color: var(--dim);
 }
 
-/* ---- link-recording modal: drop zone + browse ---- */
+.footnote .state.running {
+  color: var(--green);
+}
+
+.footnote .rule {
+  flex: none;
+  width: 1px;
+  height: 12px;
+  background: var(--hairline);
+}
+
+.footnote .stamp {
+  flex: none;
+  color: var(--dim);
+}
+
+/* One line, always. A message that wrapped would resize the strip. */
+.footnote .msg {
+  flex: 1;
+  min-width: 0;
+  color: var(--dim);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The palette has no red. Gold is the accent and reads as "look here"
+   without inventing a fourth role for the two seconds an error is up. */
+.footnote .msg.error {
+  color: var(--gold);
+}
+
+.footnote .logcount {
+  flex: none;
+  color: var(--dim);
+}
+
+.footnote:hover .logcount {
+  color: var(--gold);
+}
+
+.footnote .logcount.open {
+  color: var(--gold);
+}
+
+/* New messages cross-fade; nothing slides. */
+.footnote .msg.fresh,
+.footnote .stamp.fresh {
+  animation: fade-in 120ms ease-out;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ---- log panel: the strip unrolled ---- */
+
+.logpanel {
+  flex: none;
+  max-height: 40vh;
+  overflow-y: auto;
+  background: var(--footnote-bg);
+  border-top: 1px solid var(--hairline);
+}
+
+.logrow {
+  display: flex;
+  gap: 12px;
+  padding: 9px 22px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.logrow:last-child {
+  border-bottom: none;
+}
+
+.logrow .stamp {
+  flex: none;
+  min-width: 52px;
+  color: var(--dim);
+}
+
+.logrow .msg {
+  color: var(--dim);
+  font-style: italic;
+}
+
+/* only the newest reads at full strength */
+.logrow.newest .msg {
+  color: var(--fg);
+}
+
+.logempty {
+  padding: 9px 22px;
+  color: var(--dim);
+  font-style: italic;
+}
+
+/* ---- dialogs ---- */
 
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgb(0 0 0 / 55%);
+  background: rgb(0 0 0 / 62%);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 5;
+  z-index: 8;
 }
 
 .modal {
   position: relative; /* anchors .modal-close */
-  background: var(--panel);
-  border: 1px solid #2a2a33;
-  border-radius: 14px;
-  padding: 1.6rem;
+  background: var(--bg);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 2px;
+  padding: 26px;
   width: min(30rem, 90vw);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 16px;
   /* Without this a tall dialog centres itself and clips at BOTH ends, so
    * the title and the "Esc to close" line are the first things lost. Each
    * dialog's long list scrolls internally instead. */
@@ -441,20 +794,22 @@ button.badge:hover {
 }
 
 .modal-title {
-  font-size: 1.4rem;
-  font-weight: 700;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-weight: 400;
+  font-size: var(--figure);
+  line-height: 1.1;
 }
 
 /* Out of the flex flow entirely, so adding it moved nothing. Dim until
    reached for — Escape and the backdrop are still the fast ways out. */
 .modal-close {
   position: absolute;
-  top: 0.55rem;
-  right: 0.7rem;
-  padding: 0 0.35rem;
-  font-family: inherit;
-  font-size: 1.5rem;
-  line-height: 1.4;
+  top: 12px;
+  right: 14px;
+  padding: 0 5px;
+  font-family: "Lora", Georgia, serif;
+  font-size: 18px;
+  line-height: 1.2;
   background: none;
   border: none;
   color: var(--dim);
@@ -462,65 +817,103 @@ button.badge:hover {
 }
 
 .modal-close:hover {
-  color: var(--fg);
+  color: var(--gold);
 }
 
 .modal-hint {
   color: var(--dim);
+  font-style: italic;
+}
+
+/* two columns: keys right-aligned against their descriptions */
+.modal.help .keylist {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 9px 16px;
+  align-items: baseline;
+  text-align: left;
+  overflow-y: auto;
+  min-height: 0; /* let it shrink in the flex column rather than push the modal open */
+}
+
+.modal.help kbd {
+  font-family: "Lora", Georgia, serif;
+  font-weight: 600;
+  font-size: var(--label);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--fg);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 2px;
+  padding: 4px 7px;
+  white-space: nowrap;
+  justify-self: end;
+}
+
+.modal.help .keylist span {
+  color: var(--dim);
 }
 
 .dropzone {
-  border: 2px dashed var(--dim);
-  border-radius: 10px;
-  padding: 2.2rem 1rem;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: 2px;
+  padding: 34px 16px;
   text-align: center;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 8px;
 }
 
 .dropzone.over {
-  border-color: var(--accent);
-  background: rgb(255 180 84 / 8%);
+  border-color: var(--gold-edge);
+  background: var(--gold-tint);
 }
 
 .dropzone-big {
-  font-size: 1.2rem;
-  font-weight: 600;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-weight: 400;
+  font-size: var(--figure);
+  line-height: 1.1;
 }
 
 .dropzone-small {
   color: var(--dim);
-  font-size: 0.9rem;
+  font-style: italic;
 }
 
+/* The shared outlined button: same shape as the card actions. min-height
+   rather than height — at Label tracking, "delete this project" wraps to
+   two lines in a three-up row, and a fixed height would clip it. Siblings
+   stretch to match, so the row stays even. */
 .modal .browse {
-  font: inherit;
-  font-size: 1.05rem;
-  font-weight: 600;
-  background: var(--bg);
+  min-height: 34px;
+  line-height: 1.35;
+  padding: 8px 14px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 4px;
+  background: none;
   color: var(--fg);
-  border: 1px solid var(--dim);
-  border-radius: 8px;
-  padding: 0.6rem;
+  font-family: "Lora", Georgia, serif;
+  font-weight: 600;
+  font-size: var(--label);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  line-height: 1;
   cursor: pointer;
 }
 
 .modal .browse:hover {
-  border-color: var(--accent);
+  background: var(--gold-tint);
+  border-color: var(--gold-edge);
 }
 
 .modal .danger {
-  color: var(--warn);
-}
-
-.modal .danger:hover {
-  border-color: var(--warn);
+  color: var(--gold);
 }
 
 .modal-actions {
   display: flex;
-  gap: 0.6rem;
+  gap: 8px;
 }
 
 .modal-actions .browse {
@@ -532,36 +925,38 @@ button.badge:hover {
 .projlist {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
   max-height: 40vh;
   overflow-y: auto;
+  border-top: 1px solid var(--hairline);
 }
 
 .projrow {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  gap: 1rem;
+  gap: 16px;
   font: inherit;
-  background: var(--bg);
+  background: none;
   color: var(--fg);
-  border: 2px solid transparent;
-  border-radius: 8px;
-  padding: 0.55rem 0.8rem;
+  border: none;
+  border-bottom: 1px solid var(--hairline);
+  border-left: 1px solid transparent;
+  padding: 9px 11px;
   cursor: pointer;
   text-align: left;
 }
 
 .projrow:hover {
-  border-color: var(--dim);
+  background: var(--hover-tint);
 }
 
+/* a left rule rather than a full border: same marginal-note idiom as the
+   card note, and it doesn't shift the row by a pixel when it appears */
 .projrow.active {
-  border-color: var(--accent);
+  border-left-color: var(--gold-edge);
 }
 
 .projrow-name {
-  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -569,13 +964,17 @@ button.badge:hover {
 
 .projrow-count {
   color: var(--dim);
-  font-size: 0.85rem;
+  font-family: "Lora", Georgia, serif;
+  font-weight: 600;
+  font-size: var(--label);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
   flex: none;
 }
 
 .newproj {
   display: flex;
-  gap: 0.6rem;
+  gap: 8px;
 }
 
 .newproj input {
@@ -585,55 +984,46 @@ button.badge:hover {
 /* ---- excerpt editor ---- */
 
 .modal input {
-  font: inherit;
-  background: var(--bg);
+  font-family: "Lora", Georgia, serif;
+  font-size: var(--text);
+  background: var(--footnote-bg);
   color: var(--fg);
-  border: 1px solid var(--dim);
-  border-radius: 8px;
-  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 2px;
+  padding: 7px 9px;
 }
 
 .modal input:focus {
-  outline: 2px solid var(--focus);
+  outline: 2px solid var(--gold-edge);
+  outline-offset: -1px;
   border-color: transparent;
 }
 
 .excform {
   display: flex;
   flex-direction: column;
-  gap: 0.8rem;
+  gap: 13px;
 }
 
 .excfield {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 5px;
 }
 
 .excfield span {
   color: var(--dim);
-  font-size: 0.85rem;
+  font-family: "Lora", Georgia, serif;
+  font-weight: 600;
+  font-size: var(--label);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
 }
 
 .form-error {
-  color: var(--warn);
+  color: var(--gold);
+  font-style: italic;
   min-height: 1.2em;
-  font-size: 0.9rem;
-}
-
-/* the add-excerpt card at the end of the row */
-.excerpt.addcard {
-  min-width: 7rem;
-  border: 2px dashed var(--dim);
-  background: none;
-  color: var(--dim);
-  font-size: 1.05rem;
-  text-align: center;
-}
-
-.excerpt.addcard:hover {
-  color: var(--fg);
-  border-color: var(--fg);
 }
 
 /* ---- arm overlay: one gesture arms audio + file permission (§11) ---- */
@@ -646,12 +1036,21 @@ button.badge:hover {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1rem;
+  gap: 14px;
   z-index: 10;
-  font-size: 1.6rem;
+}
+
+.overlay .wordmark {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-weight: 400;
+  font-size: 44px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  /* the tracking is trailing-only, so the word reads off-centre without this */
+  text-indent: 0.26em;
 }
 
 .overlay .hint {
   color: var(--dim);
-  font-size: 1rem;
+  font-style: italic;
 }

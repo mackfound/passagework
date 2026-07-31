@@ -17,6 +17,8 @@ import {
   KEYMAP_HELP,
   NUDGE_COARSE,
   RATE_MAX,
+  RATE_MIN,
+  RATE_STEP,
   clampRate,
   clampView,
   entryPosition,
@@ -105,6 +107,20 @@ interface UiState {
   imageRole: "part" | "score";
   message: string;
   messageIsError: boolean;
+  /** When the strip's current message arrived. Drives its timestamp. */
+  messageAt: number | null;
+  /**
+   * Excerpt-scoped message (§3b): shown as a marginal note on that card
+   * instead of in the strip. One at a time, like the strip's own message —
+   * otherwise every card accumulates a note nobody reads again.
+   */
+  note: { excerptId: string; message: string } | null;
+  /** Newest last. Capped at LOG_LIMIT; the panel renders it reversed. */
+  log: LogEntry[];
+  logOpen: boolean;
+  /** Messages that have arrived since the panel was last opened. */
+  unseen: number;
+  rateMenuOpen: boolean;
   linkModal: { open: boolean; hint: string; target: LinkTarget };
   /** Project library dialog (M2): switch/create/import/export/delete. */
   libraryOpen: boolean;
@@ -127,6 +143,20 @@ interface UiState {
   /** Keymap legend. Nothing else in the app advertises a binding. */
   helpOpen: boolean;
 }
+
+/**
+ * One line of the session log. Session-only: this is not the practice log
+ * of §7, which is an append-only persisted event stream with its own shape.
+ * Conflating them would make that migration harder, not easier.
+ */
+interface LogEntry {
+  at: number;
+  message: string;
+  isError: boolean;
+}
+
+/** Enough to scroll back through a practice session, bounded so it can't grow. */
+const LOG_LIMIT = 200;
 
 /** What the link modal is linking: one excerpt's recording, or its image slot. */
 type LinkTarget =
@@ -203,15 +233,71 @@ function rateFor(exc: Excerpt): number {
   return clampRate(S.app.workingRates[exc.id] ?? exc.defaultRate);
 }
 
+/**
+ * Message routing (§3b). Everything lands in the log; where it *shows*
+ * depends on whether it is about the app or about one excerpt.
+ *
+ * `say` is global — the engine, the project, the file system, and every
+ * failure. It goes to the footnote strip, which is always on screen.
+ *
+ * `note` is excerpt-scoped — a recording linked, an image attached, a
+ * region marked. It renders as a marginal note on that card, next to the
+ * thing it just changed, so the strip stays free for app-level news.
+ * Failures stay on `say` even when they concern one excerpt: an error the
+ * user needs to act on shouldn't be parked on a card that may be scrolled
+ * out of the row.
+ */
+function record(message: string, isError: boolean): void {
+  S.log.push({ at: Date.now(), message, isError });
+  if (S.log.length > LOG_LIMIT) S.log.splice(0, S.log.length - LOG_LIMIT);
+  // Opening the panel is what marks messages seen; while it is open they
+  // are being read as they arrive, so the counter never starts climbing.
+  if (!S.logOpen) S.unseen++;
+}
+
 function say(message: string, isError = false): void {
   S.message = message;
   S.messageIsError = isError;
+  S.messageAt = Date.now();
+  record(message, isError);
   renderStatus();
+}
+
+function note(excerptId: string, message: string): void {
+  S.note = { excerptId, message };
+  record(message, false);
+  renderStatus();
+}
+
+/** Drop the marginal note if it belongs to an excerpt that is gone. */
+function pruneNote(): void {
+  if (S.note && !S.doc.excerpts.some((e) => e.id === S.note!.excerptId)) S.note = null;
 }
 
 function fmtTime(s: number): string {
   const m = Math.floor(s / 60);
   return `${m}:${(s - m * 60).toFixed(2).padStart(5, "0")}`;
+}
+
+/** Wall clock for the strip and the log. Tabular, so the column aligns. */
+function fmtStamp(at: number): string {
+  const d = new Date(at);
+  return [d.getHours(), d.getMinutes(), d.getSeconds()]
+    .map((n) => String(n).padStart(2, "0"))
+    .join(":");
+}
+
+/**
+ * The word at the left of the strip. The spec names stopped / looping /
+ * armed; "playing" is the fourth real state — Esc drops the loop but keeps
+ * the audio running (free playback), and calling that "stopped" would be a
+ * lie told next to a green dot.
+ */
+function transportState(): { word: string; running: boolean } {
+  const moving = !!S.engine && !S.engine.paused;
+  if (S.draftStart !== null) return { word: "armed", running: moving };
+  if (S.loopingId !== null) return { word: "looping", running: moving };
+  return { word: moving ? "playing" : "stopped", running: moving };
 }
 
 // ---------- intent handlers ----------
@@ -247,7 +333,7 @@ async function startLoop(exc: Excerpt): Promise<void> {
   if (!exc.region) {
     S.loopingId = null;
     S.engine.setLoop(null);
-    say(`"${exc.title ?? exc.label}" is untimed — Space to play, tap I / O to mark it`);
+    note(exc.id, "untimed — Space to play, tap I / O to mark it");
     render();
     return;
   }
@@ -316,23 +402,24 @@ async function ensureSourceLoaded(exc: Excerpt): Promise<boolean> {
   return true;
 }
 
-function rateStepIntent(dir: 1 | -1): void {
+function setRate(rate: number): void {
   const exc = selected();
   if (!exc) return;
-  const next = stepRate(rateFor(exc), dir);
+  const next = clampRate(rate);
   S.app.workingRates[exc.id] = next; // sticky-persisted progress, not config (AppState)
   S.engine?.setRate(next);
   persistApp();
   renderStatus();
 }
 
-function rateReset(): void {
+function rateStepIntent(dir: 1 | -1): void {
   const exc = selected();
   if (!exc) return;
-  S.app.workingRates[exc.id] = RATE_MAX;
-  S.engine?.setRate(RATE_MAX);
-  persistApp();
-  renderStatus();
+  setRate(stepRate(rateFor(exc), dir));
+}
+
+function rateReset(): void {
+  setRate(RATE_MAX);
 }
 
 function tap(edge: "start" | "end"): void {
@@ -348,15 +435,15 @@ function tap(edge: "start" | "end"): void {
       const next = normalizeRegion(pos, exc.region.end, S.duration);
       if (next) {
         exc.region = next;
-        say(`in → ${fmtTime(pos)}`);
+        note(exc.id, `in → ${fmtTime(pos)}`);
       } else {
         S.draftStart = pos; // tapped past the old end: treat as a fresh in-point
         exc.region = null;
-        say(`in → ${fmtTime(pos)} — tap O to set the out point`);
+        note(exc.id, `in → ${fmtTime(pos)} — tap O to set the out point`);
       }
     } else {
       S.draftStart = pos;
-      say(`in → ${fmtTime(pos)} — tap O to set the out point`);
+      note(exc.id, `in → ${fmtTime(pos)} — tap O to set the out point`);
     }
   } else {
     const start = S.draftStart ?? exc.region?.start;
@@ -371,7 +458,7 @@ function tap(edge: "start" | "end"): void {
     }
     exc.region = next;
     S.draftStart = null;
-    say(`region set: ${fmtTime(next.start)} – ${fmtTime(next.end)} — press ${exc.hotkey ?? "its key"} to loop`);
+    note(exc.id, `region set ${fmtTime(next.start)} – ${fmtTime(next.end)} — press ${exc.hotkey ?? "its key"} to loop`);
   }
   persistDoc();
   render();
@@ -385,7 +472,7 @@ function nudge(edge: "start" | "end", dir: 1 | -1, coarse: boolean): void {
   exc.region = next;
   // live-update an active loop so nudges are audible immediately
   if (S.loopingId === exc.id) S.engine?.setLoop(next);
-  say(`${edge} → ${fmtTime(edge === "start" ? next.start : next.end)}`);
+  note(exc.id, `${edge} → ${fmtTime(edge === "start" ? next.start : next.end)}`);
   persistDoc();
   renderStatus();
 }
@@ -400,6 +487,28 @@ function toggleImage(): void {
 function togglePreRoll(): void {
   S.preRollEnabled = !S.preRollEnabled;
   say(S.preRollEnabled ? "pre-roll on" : "pre-roll off");
+  render();
+}
+
+/**
+ * The excerpt's own `loop` flag — authored config, so it persists with the
+ * project rather than the session. A live loop follows immediately: the
+ * point of the toggle is to hear the difference on the passage in front of
+ * you, not on the next one.
+ */
+function toggleExcerptLoop(): void {
+  const exc = selected();
+  if (!exc) return;
+  exc.loop = !exc.loop;
+  if (S.loopingId === exc.id) S.engine?.setLoop(exc.loop ? exc.region : null);
+  persistDoc();
+  say(exc.loop ? "loop on" : "loop off — plays through");
+  render();
+}
+
+function toggleLog(): void {
+  S.logOpen = !S.logOpen;
+  if (S.logOpen) S.unseen = 0; // opening is what marks them read
   render();
 }
 
@@ -509,7 +618,7 @@ function waveformCommit(region: Region): void {
   exc.region = region;
   if (S.loopingId === exc.id) S.engine?.setLoop(region);
   persistDoc();
-  say(`region set: ${fmtTime(region.start)} – ${fmtTime(region.end)}`);
+  note(exc.id, `region set ${fmtTime(region.start)} – ${fmtTime(region.end)}`);
   render();
 }
 
@@ -608,7 +717,7 @@ async function completeLink(
   } else if (!persistent) {
     say(`linked for this session: ${file.name} — re-link after a restart`, true);
   } else {
-    say(`linked to "${exc.title ?? exc.label}": ${file.name}`);
+    note(exc.id, `linked ${file.name}`);
   }
   render();
 }
@@ -648,7 +757,7 @@ function applyImageAsset(excerptId: string, role: "part" | "score", data: AssetD
   S.imageRole = role;
   S.linkModal.open = false;
   // asset mode must be visible, not silent (§5)
-  say(`${role} image attached (${data.kind === "inline" ? "inline" : "file-backed"})`);
+  note(excerptId, `${role} image attached (${data.kind === "inline" ? "inline" : "file-backed"})`);
   render();
   void renderImage();
 }
@@ -702,7 +811,7 @@ function closeDialogs(): void {
  * cancel path ends in render(), which rebuilds the normal bar.
  */
 function startRenameInline(btn: HTMLElement): void {
-  const input = h("input", "project-edit");
+  const input = h("input", "session-edit");
   input.type = "text";
   input.value = S.doc.name;
   input.setAttribute("aria-label", "Project name");
@@ -875,7 +984,7 @@ function saveExcerptFields(rawLabel: string, rawTitle: string, rawHotkey: string
     S.selectedId = exc.id;
     S.app.selectedExcerptId = exc.id;
     persistApp();
-    say(`added "${title || label}" — press L to link its recording`);
+    note(exc.id, "press L to link its recording");
   } else {
     const exc = S.doc.excerpts.find((e) => e.id === S.editor.excerptId);
     if (!exc) return "excerpt no longer exists";
@@ -884,7 +993,7 @@ function saveExcerptFields(rawLabel: string, rawTitle: string, rawHotkey: string
     else delete exc.title;
     if (hotkey) exc.hotkey = hotkey;
     else delete exc.hotkey;
-    say(`saved "${title || label}"`);
+    note(exc.id, "saved");
   }
   persistDoc();
   S.editor.open = false;
@@ -910,6 +1019,7 @@ function deleteExcerptFlow(excerptId: string): void {
   }
   persistDoc();
   S.editor.open = false;
+  pruneNote(); // its card is gone; the note would have nowhere to render
   say(`deleted "${gone?.title ?? gone?.label ?? "excerpt"}"`);
   render();
   void renderImage();
@@ -933,7 +1043,7 @@ async function activateEngine(want: EngineKind): Promise<string | null> {
   const ctx = S.ctx;
   if (!ctx) return null;
   let kind = want;
-  let note: string | null = null;
+  let fellBack: string | null = null;
 
   if (!S.engines.has(kind)) {
     if (kind === "worklet") {
@@ -942,7 +1052,7 @@ async function activateEngine(want: EngineKind): Promise<string | null> {
       } catch (err) {
         const why =
           err instanceof EngineLoadError ? err.message : "the seamless engine failed to start";
-        note = `${why} — using the basic engine`;
+        fellBack = `${why} — using the basic engine`;
         kind = "media";
       }
     }
@@ -954,7 +1064,7 @@ async function activateEngine(want: EngineKind): Promise<string | null> {
   S.engineKind = kind;
   S.loadedSourceId = slot.sourceId;
   if (slot.duration !== null) S.duration = slot.duration;
-  return note;
+  return fellBack;
 }
 
 /** Subscribe once, at construction — reuse must not stack tick callbacks. */
@@ -981,7 +1091,7 @@ async function toggleEngine(): Promise<void> {
   S.engine?.pause();
   S.loopingId = null;
 
-  const note = await activateEngine(want);
+  const fellBack = await activateEngine(want);
   S.app.engine = S.engineKind;
   persistApp();
 
@@ -995,7 +1105,7 @@ async function toggleEngine(): Promise<void> {
       S.engine?.seek(at);
       onTick(at);
     }
-    say(note ?? named, Boolean(note));
+    say(fellBack ?? named, Boolean(fellBack));
   } catch {
     say(`"${file?.name ?? "that recording"}" won't load into that engine — press L to link another`, true);
   }
@@ -1053,8 +1163,8 @@ async function armAudio(): Promise<void> {
   const ctx = new AudioContext();
   await ctx.resume();
   S.ctx = ctx;
-  const note = await activateEngine(S.app.engine ?? "worklet");
-  if (note) say(note, true);
+  const fellBack = await activateEngine(S.app.engine ?? "worklet");
+  if (fellBack) say(fellBack, true);
 
   const exc = selected();
   if (!exc) return;
@@ -1119,7 +1229,6 @@ function h<K extends keyof HTMLElementTagNameMap>(
   return el;
 }
 
-let posEl: HTMLElement;
 let fillEl: HTMLElement;
 let regionBarEl: HTMLElement;
 /** Live panel, or null when closed. render() owns its lifecycle. */
@@ -1127,55 +1236,7 @@ let waveform: WaveformHandle | null = null;
 
 function render(): void {
   app.textContent = "";
-
-  // status bar: brand mark, then the project name (edits in place) and
-  // the chevron that opens the library
-  const bar = h("div", "status");
-  bar.append(h("span", "brand", APP_NAME));
-  const nameBtn = h("button", "project", S.doc.name);
-  nameBtn.type = "button";
-  nameBtn.title = "click to rename";
-  nameBtn.addEventListener("click", () => startRenameInline(nameBtn));
-  const menuBtn = h("button", "projmenu", "▾");
-  menuBtn.type = "button";
-  menuBtn.title = "projects: switch, import/export, create";
-  menuBtn.addEventListener("click", () => {
-    menuBtn.blur();
-    openLibrary();
-  });
-  bar.append(nameBtn, menuBtn);
-  const exc = selected();
-  bar.append(h("span", "rate", exc ? `${rateFor(exc).toFixed(2)}×` : "—"));
-  posEl = h("span", "pos");
-  bar.append(posEl);
-  const loopBadge = h("span", `badge${S.loopingId ? " on" : ""}`, "LOOP");
-  const prBadge = h("span", `badge${S.preRollEnabled ? " on" : ""}`, "PRE-ROLL");
-  // The engine badge doubles as M4's fallback toggle. A button rather than
-  // a key: choosing an engine is setup, not something done mid-passage.
-  const seamless = S.engineKind === "worklet";
-  const engBtn = h("button", `badge toggle${seamless ? " on" : ""}`, "SEAMLESS");
-  engBtn.type = "button";
-  engBtn.title = seamless
-    ? "gapless loops, pitch held down to 0.50× — click for the basic engine"
-    : "basic engine: a gap at the loop seam — click for seamless playback";
-  engBtn.addEventListener("click", () => {
-    engBtn.blur(); // keys stay global; a focus ring here would eat Space
-    void toggleEngine();
-  });
-  bar.append(loopBadge, prBadge, engBtn);
-  const msg = h("span", `msg${S.messageIsError ? " error" : ""}`, S.message);
-  bar.append(msg);
-  // Far right, and the only thing on screen that advertises a key at all.
-  const helpBtn = h("button", "helpbtn", "?");
-  helpBtn.type = "button";
-  helpBtn.title = "keyboard shortcuts";
-  helpBtn.setAttribute("aria-label", "keyboard shortcuts");
-  helpBtn.addEventListener("click", () => {
-    helpBtn.blur(); // keys stay global; a focus ring here would eat Space
-    toggleHelp();
-  });
-  bar.append(helpBtn);
-  app.append(bar);
+  app.append(renderHeader());
 
   // stage
   const stage = h("div", "stage");
@@ -1218,64 +1279,8 @@ function render(): void {
 
   // excerpt row
   const row = h("div", "excerpts");
-  for (const e of S.doc.excerpts) {
-    const card = h("button", "excerpt");
-    card.type = "button";
-    if (e.id === S.selectedId) card.classList.add("selected");
-    if (e.id === S.loopingId) card.classList.add("looping");
-    const top = h("div");
-    if (e.hotkey) top.append(h("span", "key", e.hotkey.toUpperCase()));
-    top.append(h("span", "short", e.title ?? e.label));
-    card.append(top);
-    const detail = h("div", "detail");
-    detail.append(h("span", undefined, e.label));
-    detail.append(
-      e.region
-        ? h("span", undefined, `${fmtTime(e.region.start)}–${fmtTime(e.region.end)}`)
-        : h("span", "untimed", "untimed"),
-    );
-    // which recording this card plays — sources differ per excerpt now.
-    // The label is the linked filename; a linked source without one (linked
-    // by an older build, not yet self-healed by a load) falls back honestly.
-    const src = sourceOf(e);
-    detail.append(
-      isLinked(src)
-        ? h("span", "srcname", src!.label || "recording linked")
-        : h("span", "srcname missing", "no recording"),
-    );
-    for (const use of e.assets) {
-      const data = S.doc.assets[use.ref];
-      if (data) detail.append(h("span", "assetmode", `${use.role}:${data.kind === "inline" ? "inline" : "file"}`));
-    }
-    card.append(detail);
-    // attach/edit buttons: selected card only; mouse is allowed during setup (§10)
-    if (e.id === S.selectedId) {
-      const attach = h("div", "attach");
-      for (const role of ["part", "score"] as const) {
-        const btn = h("button", undefined, `${e.assets.some((a) => a.role === role) ? "replace" : "attach"} ${role}`);
-        btn.type = "button";
-        btn.addEventListener("click", (ev) => {
-          ev.stopPropagation();
-          attachImage(e, role);
-        });
-        attach.append(btn);
-      }
-      const edit = h("button", undefined, "edit");
-      edit.type = "button";
-      edit.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        openEditor(e.id);
-      });
-      attach.append(edit);
-      card.append(attach);
-    }
-    card.addEventListener("click", () => {
-      selectExcerpt(e);
-      card.blur(); // keep keys global; focus ring here would eat Space
-    });
-    row.append(card);
-  }
-  const add = h("button", "excerpt addcard", "+ excerpt");
+  for (const e of S.doc.excerpts) row.append(renderCard(e));
+  const add = h("button", "excerpt addcard t-label", "+ excerpt");
   add.type = "button";
   add.addEventListener("click", () => {
     add.blur();
@@ -1284,10 +1289,294 @@ function render(): void {
   row.append(add);
   app.append(row);
 
+  // Docked to the bottom edge, with the log unrolling upward above it, so
+  // the strip itself never moves when the panel opens.
+  if (S.logOpen) app.append(renderLogPanel());
+  app.append(renderFootnote());
+
   if (S.linkModal.open) renderLinkModal();
   if (S.libraryOpen) renderLibraryModal();
   if (S.editor.open) renderEditorModal();
   if (S.helpOpen) renderHelpModal();
+}
+
+/**
+ * One 52px row (§3c). Everything that used to sit here as prose — the
+ * message, the position readout — moved to the footnote strip, which is
+ * what makes a single row enough.
+ */
+function renderHeader(): HTMLElement {
+  const bar = h("div", "header");
+  bar.append(h("span", "brand", APP_NAME));
+
+  // name and chevron are one target: clicking either opens the library,
+  // and renaming is the double-click. Two adjacent buttons that did
+  // different things at this size would be a coin flip.
+  const session = h("button", "session");
+  session.type = "button";
+  session.title = "projects: switch, import/export, create — double-click to rename";
+  const nameEl = h("span", "session-name", S.doc.name);
+  session.append(nameEl, h("span", "chevron"));
+  session.addEventListener("click", () => {
+    session.blur();
+    openLibrary();
+  });
+  session.addEventListener("dblclick", (ev) => {
+    ev.preventDefault();
+    startRenameInline(session);
+  });
+  bar.append(session);
+
+  bar.append(h("div", "spacer"));
+  bar.append(renderToggles());
+  bar.append(renderRate());
+  bar.append(h("span", "rule"));
+
+  // The only thing on screen that advertises a key at all.
+  const helpBtn = h("button", "helpbtn", "?");
+  helpBtn.type = "button";
+  helpBtn.title = "keyboard shortcuts";
+  helpBtn.setAttribute("aria-label", "keyboard shortcuts");
+  helpBtn.addEventListener("click", () => {
+    helpBtn.blur(); // keys stay global; a focus ring here would eat Space
+    toggleHelp();
+  });
+  bar.append(helpBtn);
+  return bar;
+}
+
+/**
+ * Three independent toggles, not a radio group — hence no selection
+ * indicator beyond the tint. Each is a different kind of setting, which is
+ * exactly why they read the same: none of them is the important one.
+ */
+function renderToggles(): HTMLElement {
+  const strip = h("div", "toggles");
+  const exc = selected();
+
+  const add = (label: string, on: boolean, title: string, onClick: () => void) => {
+    const btn = h("button", on ? "on" : undefined, label);
+    btn.type = "button";
+    btn.title = title;
+    btn.setAttribute("aria-pressed", String(on));
+    btn.addEventListener("click", () => {
+      btn.blur(); // keys stay global; a focus ring here would eat Space
+      onClick();
+    });
+    strip.append(btn);
+  };
+
+  // LOOP writes the excerpt's own `loop` field — authored config, so it
+  // persists with the project. Esc's "loop off" is the live override and
+  // deliberately does not touch this.
+  add(
+    "loop",
+    exc?.loop ?? false,
+    exc?.loop
+      ? "this excerpt loops at the out point — click to play through instead"
+      : "this excerpt plays through — click to loop it",
+    () => toggleExcerptLoop(),
+  );
+  add(
+    "pre-roll",
+    S.preRollEnabled,
+    "start a beat early when entering an excerpt",
+    () => togglePreRoll(),
+  );
+  const seamless = S.engineKind === "worklet";
+  add(
+    "seamless",
+    seamless,
+    seamless
+      ? "gapless loops, pitch held down to 0.50× — click for the basic engine"
+      : "basic engine: a gap at the loop seam — click for seamless playback",
+    () => void toggleEngine(),
+  );
+  return strip;
+}
+
+/** Rate as a visible number, always (§8), plus the ladder behind it. */
+function renderRate(): HTMLElement {
+  const wrap = h("div", "rate");
+  const exc = selected();
+  const figure = h("button", "rate-figure", exc ? `${rateFor(exc).toFixed(2)}×` : "—");
+  figure.type = "button";
+  figure.title = "playback rate — scroll or ↑↓ to nudge, click for the ladder";
+  figure.addEventListener("click", () => {
+    S.rateMenuOpen = !S.rateMenuOpen;
+    renderStatus();
+  });
+  // Wheel and arrows work on the control itself. Passive:false because a
+  // wheel over the rate must nudge it, not scroll the excerpt row behind.
+  figure.addEventListener(
+    "wheel",
+    (ev) => {
+      if (!selected()) return;
+      ev.preventDefault();
+      rateStepIntent(ev.deltaY < 0 ? 1 : -1);
+    },
+    { passive: false },
+  );
+  figure.addEventListener("keydown", (ev) => {
+    if (ev.key !== "ArrowUp" && ev.key !== "ArrowDown") return;
+    // The global keymap gives the arrows to region nudging; while this
+    // control has focus they belong to it, so the event stops here.
+    ev.stopPropagation();
+    ev.preventDefault();
+    rateStepIntent(ev.key === "ArrowUp" ? 1 : -1);
+  });
+  wrap.append(figure);
+
+  if (S.rateMenuOpen && exc) {
+    const menu = h("div", "rate-menu");
+    menu.setAttribute("role", "menu");
+    const current = rateFor(exc);
+    // top to bottom, fast to slow: the ladder is climbed upward, so the
+    // target sits above where you are
+    for (let r = RATE_MAX; r >= RATE_MIN - 1e-9; r -= RATE_STEP) {
+      const value = Number(r.toFixed(2));
+      const item = h("button", value === current ? "current" : undefined, `${value.toFixed(2)}×`);
+      item.type = "button";
+      item.addEventListener("click", () => {
+        setRate(value);
+        S.rateMenuOpen = false;
+        renderStatus();
+      });
+      menu.append(item);
+    }
+    wrap.append(menu);
+  }
+  return wrap;
+}
+
+function renderCard(e: Excerpt): HTMLElement {
+  const card = h("button", "excerpt");
+  card.type = "button";
+  if (e.id === S.selectedId) card.classList.add("selected");
+
+  const head = h("div", "excerpt-head");
+  // The chip is the key you press. Excerpts without one are reachable by
+  // prev/next, so the slot stays empty rather than inventing a number.
+  head.append(h("span", "chip t-label", e.hotkey ? e.hotkey.toUpperCase() : ""));
+  head.append(h("span", "title t-figure", e.title ?? e.label));
+  // inline vs handle is a real distinction (§5) and must not be silent
+  const modes = e.assets
+    .map((use) => {
+      const data = S.doc.assets[use.ref];
+      return data ? `${use.role}: ${data.kind === "inline" ? "inline" : "file"}` : null;
+    })
+    .filter((s): s is string => s !== null);
+  if (modes.length > 0) head.append(h("span", "assetchip t-label", modes.join("  ")));
+  card.append(head);
+
+  // locus and timecode on one line, joined by a middot
+  const locus = h("div", "locus");
+  locus.append(h("span", undefined, e.label));
+  locus.append(h("span", "sep", "·"));
+  locus.append(
+    e.region
+      ? h("span", "tnum", `${fmtTime(e.region.start)}–${fmtTime(e.region.end)}`)
+      : h("span", "untimed", "untimed"),
+  );
+  // which recording this card plays — sources differ per excerpt now.
+  // The label is the linked filename; a linked source without one (linked
+  // by an older build, not yet self-healed by a load) falls back honestly.
+  const src = sourceOf(e);
+  if (!isLinked(src)) {
+    locus.append(h("span", "sep", "·"));
+    locus.append(h("span", "missing", "no recording"));
+  }
+  card.append(locus);
+
+  if (S.note?.excerptId === e.id) card.append(h("div", "note", S.note.message));
+
+  // action buttons: selected card only; mouse is allowed during setup (§10)
+  if (e.id === S.selectedId) {
+    const actions = h("div", "actions");
+    for (const role of ["part", "score"] as const) {
+      const btn = h(
+        "button",
+        undefined,
+        `${e.assets.some((a) => a.role === role) ? "replace" : "attach"} ${role}`,
+      );
+      btn.type = "button";
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        attachImage(e, role);
+      });
+      actions.append(btn);
+    }
+    const edit = h("button", undefined, "edit");
+    edit.type = "button";
+    edit.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      openEditor(e.id);
+    });
+    actions.append(edit);
+    card.append(actions);
+  }
+
+  card.addEventListener("click", () => {
+    selectExcerpt(e);
+    card.blur(); // keep keys global; focus ring here would eat Space
+  });
+  return card;
+}
+
+/**
+ * The footnote strip (§3): transport state at the left, the newest global
+ * message in the middle, the log count at the right. Clicking anywhere on
+ * it opens the log — the whole strip is the affordance, so there is no
+ * small target to hit.
+ */
+function renderFootnote(): HTMLElement {
+  const strip = h("div", "footnote");
+  strip.setAttribute("role", "button");
+  strip.tabIndex = 0;
+  strip.setAttribute("aria-label", S.logOpen ? "close log" : "open log");
+
+  const { word, running } = transportState();
+  strip.append(h("span", `dot${running ? " running" : ""}`));
+  strip.append(h("span", `state t-label${running ? " running" : ""}`, word));
+  strip.append(h("span", "rule"));
+  strip.append(
+    h("span", "stamp t-label tnum fresh", S.messageAt === null ? "" : fmtStamp(S.messageAt)),
+  );
+  strip.append(h("span", `msg fresh${S.messageIsError ? " error" : ""}`, S.message));
+
+  strip.append(
+    h(
+      "span",
+      `logcount t-label${S.logOpen ? " open" : ""}`,
+      S.logOpen ? "close log" : `log · ${S.unseen}`,
+    ),
+  );
+
+  strip.addEventListener("click", () => toggleLog());
+  strip.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    ev.stopPropagation(); // Space is play/pause everywhere else
+    ev.preventDefault();
+    toggleLog();
+  });
+  return strip;
+}
+
+function renderLogPanel(): HTMLElement {
+  const panel = h("div", "logpanel");
+  if (S.log.length === 0) {
+    panel.append(h("div", "logempty", "nothing logged yet"));
+    return panel;
+  }
+  // newest first: the thing you just did is the thing you came to read
+  for (let i = S.log.length - 1; i >= 0; i--) {
+    const entry = S.log[i]!;
+    const rowEl = h("div", `logrow${i === S.log.length - 1 ? " newest" : ""}`);
+    rowEl.append(h("span", "stamp t-label tnum", fmtStamp(entry.at)));
+    rowEl.append(h("span", "msg", entry.message));
+    panel.append(rowEl);
+  }
+  return panel;
 }
 
 /**
@@ -1569,18 +1858,23 @@ function attachImage(exc: Excerpt, role: "part" | "score"): void {
   );
 }
 
+/**
+ * The header carries no status text and the footnote strip's contents are
+ * fixed (§3, §3c), so the running timecode has no home in the chrome any
+ * more. The region strip is the position readout now — full width, legible
+ * from three feet, and it says the one thing that matters mid-passage:
+ * where you are between the in and out points.
+ */
 function onTick(pos: number): void {
   waveform?.tick();
-  if (!posEl) return;
+  if (!fillEl) return;
   const exc = selected();
   if (exc?.region) {
-    posEl.textContent = `${fmtTime(pos)}  ·  ${fmtTime(exc.region.start)}–${fmtTime(exc.region.end)}`;
     const { start, end } = exc.region;
     const frac = (pos - start) / (end - start);
     regionBarEl.classList.toggle("preroll", pos < start);
     fillEl.style.width = `${Math.min(100, Math.max(0, frac * 100)).toFixed(1)}%`;
   } else {
-    posEl.textContent = fmtTime(pos);
     fillEl.style.width = "0";
   }
 }
@@ -1627,6 +1921,15 @@ function onKeydown(ev: KeyboardEvent): void {
       ev.preventDefault();
       closeDialogs();
     }
+    return;
+  }
+  // Light overlays, dismissed before the keymap sees Escape — otherwise
+  // closing the log would also stop the loop.
+  if (ev.key === "Escape" && (S.logOpen || S.rateMenuOpen)) {
+    ev.preventDefault();
+    S.logOpen = false;
+    S.rateMenuOpen = false;
+    render();
     return;
   }
   // any focused text input owns its keys (inline rename stops propagation
@@ -1705,6 +2008,12 @@ async function boot(): Promise<void> {
     imageRole: "part",
     message: "",
     messageIsError: false,
+    messageAt: null,
+    note: null,
+    log: [],
+    logOpen: false,
+    unseen: 0,
+    rateMenuOpen: false,
     linkModal: { open: false, hint: "", target: { kind: "audio", excerptId: "" } },
     libraryOpen: false,
     projectList: [],
@@ -1724,11 +2033,28 @@ async function boot(): Promise<void> {
   window.addEventListener("dragover", (ev) => ev.preventDefault());
   window.addEventListener("drop", (ev) => ev.preventDefault());
 
+  // Click-outside for the two light overlays. This runs after their own
+  // handlers have already re-rendered, so the target is detached — but its
+  // ancestors come with it, and closest() still answers correctly.
+  window.addEventListener("click", (ev) => {
+    const el = ev.target instanceof Element ? ev.target : null;
+    let changed = false;
+    if (S.logOpen && !el?.closest(".footnote, .logpanel")) {
+      S.logOpen = false;
+      changed = true;
+    }
+    if (S.rateMenuOpen && !el?.closest(".rate")) {
+      S.rateMenuOpen = false;
+      changed = true;
+    }
+    if (changed) render();
+  });
+
   document.title = APP_NAME; // config wins over the index.html fallback
 
   // One gesture arms everything: AudioContext + file permission (§11).
   const overlay = h("div", "overlay");
-  overlay.append(h("div", undefined, APP_NAME));
+  overlay.append(h("div", "wordmark", APP_NAME));
   overlay.append(h("div", "hint", "press any key to begin"));
   document.body.append(overlay);
   armOverlay = overlay;
