@@ -1481,6 +1481,7 @@ function renderLinkModal(): void {
   const modal = h("div", "modal");
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-label", isAudio ? "Link audio file" : `Attach ${target.kind === "image" ? target.role : ""} image`);
+  closeButton(modal, closeLinkModal);
 
   modal.append(h("div", "modal-title", isAudio ? "Link recording" : `${target.role === "part" ? "Part" : "Score"} image`));
   modal.append(h("div", "modal-hint", S.linkModal.hint));
