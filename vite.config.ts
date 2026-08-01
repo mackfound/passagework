@@ -8,10 +8,15 @@ const SW_SOURCE = "src/sw.js";
 
 /**
  * In dist/ but not of it. Static hosts read these at deploy time as
- * configuration and refuse to serve them — asking Cloudflare for /_headers
- * gets a 404. Precaching one would fail, and because the install is a
- * single atomic addAll, that one 404 takes every other file down with it
- * and the app silently loses offline support altogether.
+ * configuration rather than content, so they are not part of the app and
+ * have no business in its cache.
+ *
+ * Cloudflare does not serve the file itself — but measured against the
+ * live deploy, it answers an unmatched path with index.html and a 200
+ * rather than a 404. So precaching this would quietly succeed and store a
+ * second copy of the shell under a config file's URL: junk rather than a
+ * failure, which is the worse of the two, because nothing would ever have
+ * pointed at it or noticed it was there.
  */
 const HOST_CONFIG = new Set(["_headers", "_redirects", "_routes.json"]);
 
