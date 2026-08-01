@@ -17,8 +17,6 @@ import {
   KEYMAP_HELP,
   NUDGE_COARSE,
   RATE_MAX,
-  RATE_MIN,
-  RATE_STEP,
   clampRate,
   clampView,
   entryPosition,
@@ -120,7 +118,6 @@ interface UiState {
   logOpen: boolean;
   /** Messages that have arrived since the panel was last opened. */
   unseen: number;
-  rateMenuOpen: boolean;
   linkModal: { open: boolean; hint: string; target: LinkTarget };
   /** Project library dialog (M2): switch/create/import/export/delete. */
   libraryOpen: boolean;
@@ -539,6 +536,21 @@ function toggleExcerptLoop(): void {
 function toggleLog(): void {
   S.logOpen = !S.logOpen;
   if (S.logOpen) S.unseen = 0; // opening is what marks them read
+  render();
+}
+
+/**
+ * Session-only history, so this asks nothing before discarding it —
+ * nothing here is persisted or exported, and the practice log of §7 will
+ * be a separate, append-only stream. The panel stays open on "nothing
+ * logged yet", which is the confirmation.
+ *
+ * The strip's current message is left alone: it reports what is true now,
+ * not what happened, and blanking it would make the app look asleep.
+ */
+function clearLog(): void {
+  S.log = [];
+  S.unseen = 0;
   render();
 }
 
@@ -1377,22 +1389,25 @@ function renderHeader(): HTMLElement {
   const bar = h("div", "header");
   bar.append(h("span", "brand", APP_NAME));
 
-  // name and chevron are one target: clicking either opens the library,
-  // and renaming is the double-click. Two adjacent buttons that did
-  // different things at this size would be a coin flip.
-  const session = h("button", "session");
-  session.type = "button";
-  session.title = "projects: switch, import/export, create — double-click to rename";
-  const nameEl = h("span", "session-name", S.doc.name);
-  session.append(nameEl, h("span", "chevron"));
-  session.addEventListener("click", () => {
-    session.blur();
+  // One visual unit, two targets. Merging them into a single button cost
+  // the rename its click — it became a double-click nobody would guess at,
+  // and a name you can click but not edit is worse than no affordance at
+  // all. The chevron is the menu, the way it reads.
+  const session = h("div", "session");
+  const nameBtn = h("button", "session-name", S.doc.name);
+  nameBtn.type = "button";
+  nameBtn.title = "click to rename this project";
+  nameBtn.addEventListener("click", () => startRenameInline(nameBtn));
+  const menuBtn = h("button", "session-menu");
+  menuBtn.type = "button";
+  menuBtn.title = "projects: switch, import/export, create";
+  menuBtn.setAttribute("aria-label", "projects");
+  menuBtn.append(h("span", "chevron"));
+  menuBtn.addEventListener("click", () => {
+    menuBtn.blur(); // keys stay global; a focus ring here would eat Space
     openLibrary();
   });
-  session.addEventListener("dblclick", (ev) => {
-    ev.preventDefault();
-    startRenameInline(session);
-  });
+  session.append(nameBtn, menuBtn);
   bar.append(session);
 
   bar.append(h("div", "spacer"));
@@ -1463,19 +1478,20 @@ function renderToggles(): HTMLElement {
   return strip;
 }
 
-/** Rate as a visible number, always (§8), plus the ladder behind it. */
+/**
+ * Rate as a visible number, always (§8) — a readout, not a control.
+ *
+ * It briefly opened a ladder popover on click. Eleven rates in a menu is a
+ * lot of surface for something `[` and `]` already do in one keystroke,
+ * and this app's whole premise is not reaching for the mouse. The wheel
+ * stays because it costs nothing and needs no chrome.
+ */
 function renderRate(): HTMLElement {
-  const wrap = h("div", "rate");
   const exc = selected();
-  const figure = h("button", "rate-figure", exc ? `${rateFor(exc).toFixed(2)}×` : "—");
-  figure.type = "button";
-  figure.title = "playback rate — scroll or ↑↓ to nudge, click for the ladder";
-  figure.addEventListener("click", () => {
-    S.rateMenuOpen = !S.rateMenuOpen;
-    renderStatus();
-  });
-  // Wheel and arrows work on the control itself. Passive:false because a
-  // wheel over the rate must nudge it, not scroll the excerpt row behind.
+  const figure = h("div", "rate-figure tnum", exc ? `${rateFor(exc).toFixed(2)}×` : "—");
+  figure.title = "playback rate — [ and ] to change, \\ to reset, or scroll here";
+  // passive:false because a wheel over the rate must nudge it rather than
+  // scroll the excerpt row behind it
   figure.addEventListener(
     "wheel",
     (ev) => {
@@ -1485,36 +1501,7 @@ function renderRate(): HTMLElement {
     },
     { passive: false },
   );
-  figure.addEventListener("keydown", (ev) => {
-    if (ev.key !== "ArrowUp" && ev.key !== "ArrowDown") return;
-    // The global keymap gives the arrows to region nudging; while this
-    // control has focus they belong to it, so the event stops here.
-    ev.stopPropagation();
-    ev.preventDefault();
-    rateStepIntent(ev.key === "ArrowUp" ? 1 : -1);
-  });
-  wrap.append(figure);
-
-  if (S.rateMenuOpen && exc) {
-    const menu = h("div", "rate-menu");
-    menu.setAttribute("role", "menu");
-    const current = rateFor(exc);
-    // top to bottom, fast to slow: the ladder is climbed upward, so the
-    // target sits above where you are
-    for (let r = RATE_MAX; r >= RATE_MIN - 1e-9; r -= RATE_STEP) {
-      const value = Number(r.toFixed(2));
-      const item = h("button", value === current ? "current" : undefined, `${value.toFixed(2)}×`);
-      item.type = "button";
-      item.addEventListener("click", () => {
-        setRate(value);
-        S.rateMenuOpen = false;
-        renderStatus();
-      });
-      menu.append(item);
-    }
-    wrap.append(menu);
-  }
-  return wrap;
+  return figure;
 }
 
 function renderCard(e: Excerpt): HTMLElement {
@@ -1598,10 +1585,12 @@ function renderCard(e: Excerpt): HTMLElement {
  * small target to hit.
  */
 function renderFootnote(): HTMLElement {
+  // The whole strip is clickable (§3), but the chips at the right are the
+  // real buttons: nesting "clear" inside a strip that was itself
+  // role="button" would have been two controls claiming one target. The
+  // strip keeps the generous mouse hit area; the keyboard tabs to the
+  // chips, which is where the focus ring belongs.
   const strip = h("div", "footnote");
-  strip.setAttribute("role", "button");
-  strip.tabIndex = 0;
-  strip.setAttribute("aria-label", S.logOpen ? "close log" : "open log");
 
   const { word, running } = transportState();
   strip.append(h("span", `dot${running ? " running" : ""}`));
@@ -1615,21 +1604,33 @@ function renderFootnote(): HTMLElement {
   );
   strip.append(h("span", `msg${fresh}${S.messageIsError ? " error" : ""}`, S.message));
 
+  const chip = (className: string, label: string, title: string, onClick: () => void) => {
+    const btn = h("button", `${className} t-label`, label);
+    btn.type = "button";
+    btn.title = title;
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation(); // the strip behind would toggle the log back
+      btn.blur(); // keys stay global; a focus ring here would eat Space
+      onClick();
+    });
+    return btn;
+  };
+
+  // Only offered with the log in front of you: a clear button on a closed
+  // strip is a button for deleting something you cannot see.
+  if (S.logOpen && S.log.length > 0) {
+    strip.append(chip("logclear", "clear", "discard the session log", clearLog));
+  }
   strip.append(
-    h(
-      "span",
-      `logcount t-label${S.logOpen ? " open" : ""}`,
+    chip(
+      `logcount${S.logOpen ? " open" : ""}`,
       S.logOpen ? "close log" : `log · ${S.unseen}`,
+      S.logOpen ? "close the log" : "session log",
+      toggleLog,
     ),
   );
 
   strip.addEventListener("click", () => toggleLog());
-  strip.addEventListener("keydown", (ev) => {
-    if (ev.key !== "Enter" && ev.key !== " ") return;
-    ev.stopPropagation(); // Space is play/pause everywhere else
-    ev.preventDefault();
-    toggleLog();
-  });
   return strip;
 }
 
@@ -1994,12 +1995,11 @@ function onKeydown(ev: KeyboardEvent): void {
     }
     return;
   }
-  // Light overlays, dismissed before the keymap sees Escape — otherwise
-  // closing the log would also stop the loop.
-  if (ev.key === "Escape" && (S.logOpen || S.rateMenuOpen)) {
+  // The log panel is dismissed before the keymap sees Escape — otherwise
+  // closing it would also stop the loop.
+  if (ev.key === "Escape" && S.logOpen) {
     ev.preventDefault();
     S.logOpen = false;
-    S.rateMenuOpen = false;
     render();
     return;
   }
@@ -2084,7 +2084,6 @@ async function boot(): Promise<void> {
     log: [],
     logOpen: false,
     unseen: 0,
-    rateMenuOpen: false,
     linkModal: { open: false, hint: "", target: { kind: "audio", excerptId: "" } },
     libraryOpen: false,
     projectList: [],
@@ -2104,21 +2103,15 @@ async function boot(): Promise<void> {
   window.addEventListener("dragover", (ev) => ev.preventDefault());
   window.addEventListener("drop", (ev) => ev.preventDefault());
 
-  // Click-outside for the two light overlays. This runs after their own
-  // handlers have already re-rendered, so the target is detached — but its
-  // ancestors come with it, and closest() still answers correctly.
+  // Click-outside closes the log. This runs after the strip's own handler
+  // has already re-rendered, so the target is detached — but its ancestors
+  // come with it, and closest() still answers correctly.
   window.addEventListener("click", (ev) => {
+    if (!S.logOpen) return;
     const el = ev.target instanceof Element ? ev.target : null;
-    let changed = false;
-    if (S.logOpen && !el?.closest(".footnote, .logpanel")) {
-      S.logOpen = false;
-      changed = true;
-    }
-    if (S.rateMenuOpen && !el?.closest(".rate")) {
-      S.rateMenuOpen = false;
-      changed = true;
-    }
-    if (changed) render();
+    if (el?.closest(".footnote, .logpanel")) return;
+    S.logOpen = false;
+    render();
   });
 
   document.title = APP_NAME; // config wins over the index.html fallback

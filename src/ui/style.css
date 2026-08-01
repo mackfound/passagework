@@ -103,6 +103,8 @@
   --gold: #e1ad66;
   --gold-edge: #b68235;
   --gold-tint: rgb(182 130 53 / 12%);
+  /* half the button tint, for hovering a surface that contains buttons */
+  --gold-tint-faint: rgb(182 130 53 / 6%);
 
   /* green — transport only. If it isn't about sound moving, it isn't green. */
   --green: #8ecf9e;
@@ -200,28 +202,40 @@ body {
   flex: none;
 }
 
-/* session name + chevron read as one target, so they sit in one button */
+/* Name and chevron read as one unit but are two targets: the name renames,
+   the chevron opens the library. */
 .header .session {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+.header .session-name,
+.header .session-menu {
   background: none;
   border: none;
   padding: 0;
   font: inherit;
   color: var(--fg);
   cursor: pointer;
-  min-width: 0;
 }
 
 .header .session-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.header .session:hover .session-name {
+.header .session-name:hover {
   color: var(--gold);
+}
+
+.header .session-menu {
+  display: flex;
+  align-items: center;
+  flex: none;
 }
 
 /* 9×6 triangle drawn in CSS: no glyph to fall back on, no icon font */
@@ -233,7 +247,7 @@ body {
   clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
 
-.header .session:hover .chevron {
+.header .session-menu:hover .chevron {
   background: var(--gold);
 }
 
@@ -260,17 +274,20 @@ body {
   background: var(--hairline);
 }
 
+/* Sized to sit just under the rate figure rather than under the toggles —
+   at 20px it read as a stray dot. The glyph moves from Label to Text to
+   keep its weight in the circle; both are sizes the system already has. */
 .header .helpbtn {
   flex: none;
-  width: 20px;
-  height: 20px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   border: 1px solid var(--hairline-strong);
   background: none;
   color: var(--dim);
   font-family: "Lora", Georgia, serif;
-  font-weight: 600;
-  font-size: var(--label);
+  font-weight: 400;
+  font-size: var(--text);
   line-height: 1;
   padding: 0;
   cursor: pointer;
@@ -333,67 +350,21 @@ body {
   outline-offset: -2px;
 }
 
-/* ---- rate: always a visible number (§8) ---- */
-
-.rate {
-  position: relative;
-  flex: none;
-}
+/* ---- rate: always a visible number (§8) — a readout, not a control ---- */
 
 .rate-figure {
+  flex: none;
   font-family: "Cormorant Garamond", Georgia, serif;
   font-weight: 400;
   font-size: var(--figure-anchor);
   font-feature-settings: "tnum";
-  font-variant-numeric: tabular-nums;
   line-height: 1;
   color: var(--gold);
-  background: none;
-  border: none;
-  padding: 0;
   /* fixed width so 0.75× → 1.00× never shifts the row */
   min-width: 74px;
   text-align: right;
-  cursor: pointer;
-}
-
-/* the ladder popover: stroke and figures, no fill (§2) */
-.rate-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 6;
-  background: var(--footnote-bg);
-  border: 1px solid var(--gold-edge);
-  border-radius: 2px;
-  padding: 4px 0;
-  display: flex;
-  flex-direction: column;
-  max-height: 46vh;
-  overflow-y: auto;
-}
-
-.rate-menu button {
-  background: none;
-  border: none;
-  padding: 5px 16px;
-  font-family: "Lora", Georgia, serif;
-  font-weight: 600;
-  font-size: var(--label);
-  letter-spacing: 0.15em;
-  font-variant-numeric: tabular-nums;
-  color: var(--dim);
-  cursor: pointer;
-  text-align: right;
-}
-
-.rate-menu button:hover {
-  background: var(--gold-tint);
-  color: var(--fg);
-}
-
-.rate-menu button.current {
-  color: var(--gold);
+  /* the wheel nudges it; nothing here is clickable */
+  user-select: none;
 }
 
 /* ---- score stage ---- */
@@ -512,9 +483,19 @@ body {
   flex: none;
 }
 
+/* The same warm tint the card's own buttons use, at half strength, and the
+   border only firms up rather than going gold — gold on hover would be
+   indistinguishable from selection, and the tint has to stay under the
+   buttons' so their hover still reads on top of it. */
+.excerpt:hover {
+  background: var(--gold-tint-faint);
+  border-color: var(--hairline-strong);
+}
+
 /* Only the selected card is gold. Looping is reported by the footnote
    strip's dot and state word, so it does not also colour the card. */
-.excerpt.selected {
+.excerpt.selected,
+.excerpt.selected:hover {
   border-color: var(--gold-edge);
 }
 
@@ -694,17 +675,33 @@ body {
   color: var(--gold);
 }
 
-.footnote .logcount {
+/* The right-hand chips. Bare text at Label — they carry no border, so the
+   strip stays a strip rather than growing a button bar. */
+.footnote .logcount,
+.footnote .logclear {
   flex: none;
+  background: none;
+  border: none;
+  padding: 0;
   color: var(--dim);
+  cursor: pointer;
 }
 
-.footnote:hover .logcount {
+.footnote:hover .logcount,
+.footnote .logcount:hover,
+.footnote .logclear:hover {
   color: var(--gold);
 }
 
 .footnote .logcount.open {
   color: var(--gold);
+}
+
+/* Sits left of "close log" and stays quiet until reached for — discarding
+   history should never be the brighter of the two. (The message's flex:1
+   is what holds both chips against the right edge.) */
+.footnote .logclear {
+  color: var(--faint);
 }
 
 /* New messages cross-fade; nothing slides. */
