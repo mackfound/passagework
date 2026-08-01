@@ -1068,7 +1068,12 @@ function saveExcerptFields(rawLabel: string, rawTitle: string, rawHotkey: string
     else delete exc.title;
     if (hotkey) exc.hotkey = hotkey;
     else delete exc.hotkey;
-    note(exc.id, "saved");
+    // The strip, not the card. A marginal note adds a line to the card and
+    // takes it away again five seconds later, so the whole row grows and
+    // settles — a lot of movement to confirm something you already know
+    // happened, because you pressed Save. It names the excerpt since the
+    // strip has no card to be next to.
+    say(`saved "${title || label}"`);
   }
   persistDoc();
   S.editor.open = false;
