@@ -300,6 +300,18 @@ function say(message: string, isError = false): void {
 }
 
 /**
+ * Write to the log without touching the strip.
+ *
+ * For facts worth being able to look up and not worth interrupting a
+ * practice session over. The strip holds one message at a time and the
+ * eye goes to it, so spending that on something with no action attached
+ * teaches you to stop reading it.
+ */
+function logOnly(message: string): void {
+  if (record(message, false)) renderStatus(); // the log count still moves
+}
+
+/**
  * How long a card note stays. It confirms something that just happened —
  * "saved", "linked foo.wav", "in → 0:12.34" — and once read it is only
  * taking up the card. The log keeps it; the card does not need to.
@@ -2429,6 +2441,45 @@ async function boot(): Promise<void> {
   // handler, so the arming keystroke bubbled straight back into it — Space
   // armed the app and started playback in the same press.
   window.addEventListener("keydown", onKeydown);
+
+  void requestPersistence(); // never blocks the app coming up
+}
+
+/**
+ * Ask the browser not to treat this origin as disposable.
+ *
+ * Everything the app knows lives in IndexedDB, and by default a browser
+ * may evict it — not the worker's cache, which merely costs a download,
+ * but the projects: every excerpt, region and hotkey, gone with no server
+ * copy to restore from and no warning that it happened. Export to .json
+ * has always been the real backup (§5); this is the part that makes not
+ * having exported yet less likely to matter.
+ *
+ * Chromium grants or refuses silently on its own engagement heuristics —
+ * no prompt either way — and a refusal today can become a grant once the
+ * site has been used a few times or bookmarked. So this asks again on
+ * every launch rather than recording the first answer as final.
+ *
+ * The outcome goes to the log rather than the strip when it is good news,
+ * because there is nothing to do about it. A refusal takes the strip: it
+ * changes what you should do, which is keep an export.
+ */
+async function requestPersistence(): Promise<void> {
+  if (!navigator.storage?.persist) {
+    say("this browser can't guarantee stored data — keep a .json export");
+    return;
+  }
+  try {
+    const already = await navigator.storage.persisted();
+    if (already || (await navigator.storage.persist())) {
+      logOnly(already ? "storage is persistent" : "storage is now persistent");
+      return;
+    }
+    say("storage here is best-effort — keep a .json export, a browser cleanup can take it");
+  } catch {
+    // Blocked site data throws rather than answering false. Same advice.
+    say("this browser won't guarantee stored data — keep a .json export");
+  }
 }
 
 void boot();
