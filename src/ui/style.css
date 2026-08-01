@@ -483,19 +483,20 @@ body {
   flex: none;
 }
 
-/* The same warm tint the card's own buttons use, at half strength, and the
-   border only firms up rather than going gold — gold on hover would be
-   indistinguishable from selection, and the tint has to stay under the
-   buttons' so their hover still reads on top of it. */
-.excerpt:hover {
+/* Unselected only. The same warm tint the card's own buttons use, at half
+   strength, and the border firms up rather than going gold — gold on hover
+   would be indistinguishable from selection.
+   The selected card is deliberately excluded: its border has already said
+   it is selected, and tinting the body again only competes with the action
+   buttons sitting inside it, which light up on their own hover. */
+.excerpt:not(.selected):hover {
   background: var(--gold-tint-faint);
   border-color: var(--hairline-strong);
 }
 
 /* Only the selected card is gold. Looping is reported by the footnote
    strip's dot and state word, so it does not also colour the card. */
-.excerpt.selected,
-.excerpt.selected:hover {
+.excerpt.selected {
   border-color: var(--gold-edge);
 }
 
