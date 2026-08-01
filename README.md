@@ -33,6 +33,8 @@ Open it, hit one key, the passage loops.
   the loop point — the seam is stitched inside the audio thread rather than by seeking.
 - **The score on screen.** Attach a part and a full score to each passage and flip between
   them with `Tab`. The image gets the whole window; everything else is a thin strip.
+- **Zoom in on the page.** Pinch, drag to pan, or use the `−` / `=` keys, for when the
+  stand is across the room rather than in front of you.
 - **Pre-roll.** Entering a passage starts a beat or two early so you hear the approach.
   Loop wraps go to the loop point itself, not the pre-roll.
 - **Works offline.** After one visit the whole app is cached on your machine. A practice
@@ -117,7 +119,7 @@ After that, setup is over and you shouldn't need the mouse again.
 | `P` | pre-roll on / off |
 | `Tab` | switch between the part and score images |
 | `W` | waveform: drag to set loop points, click to seek |
-| `−` / `=` | zoom the waveform out / in |
+| `−` / `=` | zoom the score out / in — the waveform instead, while it's open |
 | `L` | link or replace this excerpt's recording |
 
 ## How it's built
@@ -161,7 +163,6 @@ ordinary key events.
 - **Practice features** — metronome, count-in, tempo ladder, rep counting, and a session
   log. The schema has carried unused `tempo`, `tags` and `notes` fields since the first
   commit, so these arrive without a migration.
-- **Score zoom** — a full-page scan reads fine across a music stand, less so across a room.
 - **PDF scores** via pdf.js, with crop rectangles stored as asset metadata, instead of
   pre-cropped images.
 - **Foot pedal support** — most of the way there already, since `PgUp`/`PgDn` are bound to
