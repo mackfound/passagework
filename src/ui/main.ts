@@ -247,19 +247,41 @@ function rateFor(exc: Excerpt): number {
  * user needs to act on shouldn't be parked on a card that may be scrolled
  * out of the row.
  */
-function record(message: string, isError: boolean): void {
-  S.log.push({ at: Date.now(), message, isError });
+/**
+ * Append unless this is the same line the log already ends with and it
+ * arrived inside the dedupe window. Bouncing Space against an untimed
+ * excerpt, or holding Esc, fires one identical message per keypress; a log
+ * that keeps all of them is a log you stop scrolling. Runs collapse to the
+ * entry that started them.
+ *
+ * Nothing announces this. The only visible effect is the absence of ten
+ * identical rows — and, because `say` restamps only on a true append, a
+ * strip whose timestamp holds still while the same thing keeps happening
+ * rather than flickering once per keystroke.
+ *
+ * Adjacent only, deliberately: A B A B in quick succession is four real
+ * events, and collapsing across the gap would reorder the history.
+ *
+ * Returns whether a new entry was actually made.
+ */
+const LOG_DEDUPE_MS = 2500;
+
+function record(message: string, isError: boolean): boolean {
+  const now = Date.now();
+  const newest = S.log[S.log.length - 1];
+  if (newest && newest.message === message && now - newest.at < LOG_DEDUPE_MS) return false;
+  S.log.push({ at: now, message, isError });
   if (S.log.length > LOG_LIMIT) S.log.splice(0, S.log.length - LOG_LIMIT);
   // Opening the panel is what marks messages seen; while it is open they
   // are being read as they arrive, so the counter never starts climbing.
   if (!S.logOpen) S.unseen++;
+  return true;
 }
 
 function say(message: string, isError = false): void {
+  if (record(message, isError)) S.messageAt = Date.now();
   S.message = message;
   S.messageIsError = isError;
-  S.messageAt = Date.now();
-  record(message, isError);
   renderStatus();
 }
 
@@ -268,6 +290,14 @@ function note(excerptId: string, message: string): void {
   record(message, false);
   renderStatus();
 }
+
+/**
+ * What the strip last painted. The cross-fade is for new messages (§3),
+ * and render() rebuilds the strip for every unrelated reason — selecting a
+ * card, opening the log — so without this the message fades in again each
+ * time as if it had just arrived.
+ */
+let paintedMessage: string | null = null;
 
 /** Drop the marginal note if it belongs to an excerpt that is gone. */
 function pruneNote(): void {
@@ -869,6 +899,15 @@ function adoptDoc(doc: ProjectDoc): void {
 }
 
 async function switchProject(id: string): Promise<void> {
+  // Picking the project you are already on is a no-op, not a reload.
+  // adoptDoc resets the selection to the first excerpt, drops the loop,
+  // pauses, and throws away the peak cache — a full session reset in
+  // exchange for a click that asked for nothing.
+  if (id === S.doc.id) {
+    S.libraryOpen = false;
+    render();
+    return;
+  }
   await flushDoc();
   const doc = await loadProject(id);
   if (!doc) {
@@ -1079,11 +1118,29 @@ function registerEngine(kind: EngineKind, engine: PlaybackEngine): void {
  * involve a decode, and audio restarting on its own after that pause is a
  * surprise, not a convenience.
  */
+/**
+ * Swap the live engine, carrying the transport across.
+ *
+ * The badge used to say choosing an engine was "setup, not something done
+ * mid-passage", and nothing enforced it: switching mid-loop silently
+ * paused you somewhere inside the region with the loop dropped, at the new
+ * engine's default rate.
+ *
+ * Enforcing it would have been the wrong fix. Comparing the two engines is
+ * the entire reason both are kept alive, and a comparison you can only
+ * make by stopping, switching and restarting is one you cannot actually
+ * hear — the memory of the other engine's seam is gone by the time the
+ * passage comes back around. So the loop, the rate and the play state all
+ * survive the swap, and the switch happens under the passage you are
+ * already listening to.
+ */
 async function toggleEngine(): Promise<void> {
   if (!S.ctx) return;
   const want: EngineKind = S.engineKind === "worklet" ? "media" : "worklet";
   const wanted = S.loadedSourceId;
   const at = S.engine?.getPosition() ?? 0;
+  const wasLooping = S.loopingId;
+  const wasPlaying = S.engine ? !S.engine.paused : false;
 
   // Park the outgoing engine. Paused, it renders silence, so both can stay
   // connected to the destination and only the live one is heard.
@@ -1102,7 +1159,18 @@ async function toggleEngine(): Promise<void> {
     // whole reason the engines are kept.
     if (wanted && file && S.loadedSourceId !== wanted) await loadIntoEngine(file, wanted);
     if (S.loadedSourceId) {
+      // Same order as startLoop: loop, rate, seek, play. A fresh engine
+      // carries none of this — the rate in particular was being silently
+      // reset to 1.0 on every switch.
+      const resume = S.doc.excerpts.find((e) => e.id === wasLooping) ?? null;
+      const exc = resume ?? selected();
+      if (resume?.region && resume.loop) {
+        S.engine?.setLoop(resume.region);
+        S.loopingId = resume.id;
+      }
+      if (exc) S.engine?.setRate(rateFor(exc));
       S.engine?.seek(at);
+      if (wasPlaying) S.engine?.play();
       onTick(at);
     }
     say(fellBack ?? named, Boolean(fellBack));
@@ -1539,10 +1607,13 @@ function renderFootnote(): HTMLElement {
   strip.append(h("span", `dot${running ? " running" : ""}`));
   strip.append(h("span", `state t-label${running ? " running" : ""}`, word));
   strip.append(h("span", "rule"));
+
+  const fresh = S.message === paintedMessage ? "" : " fresh";
+  paintedMessage = S.message;
   strip.append(
-    h("span", "stamp t-label tnum fresh", S.messageAt === null ? "" : fmtStamp(S.messageAt)),
+    h("span", `stamp t-label tnum${fresh}`, S.messageAt === null ? "" : fmtStamp(S.messageAt)),
   );
-  strip.append(h("span", `msg fresh${S.messageIsError ? " error" : ""}`, S.message));
+  strip.append(h("span", `msg${fresh}${S.messageIsError ? " error" : ""}`, S.message));
 
   strip.append(
     h(
