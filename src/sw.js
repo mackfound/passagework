@@ -149,14 +149,25 @@ self.addEventListener("fetch", (event) => {
 
   event.respondWith(
     (async () => {
-      const hit = await caches.match(key, MATCH).catch(() => undefined);
-      if (hit) return hit;
+      // Two separate try blocks, not one .catch() per call. A .catch()
+      // only handles a rejected promise, and CacheStorage can fail harder
+      // than that: where site data is blocked outright, `caches` is
+      // undefined and `caches.match` throws synchronously before there is
+      // a promise to attach anything to. Inside an async function that is
+      // still a rejection, and a rejection reaching respondWith is the
+      // whole bug this handler exists to not have.
+      try {
+        const hit = await caches.match(key, MATCH);
+        if (hit) return hit;
 
-      // Missing something the build shipped means the cache is not what
-      // install left behind. Rebuild it in the background so the next
-      // visit works offline again instead of staying one outage away from
-      // being unopenable.
-      void refill();
+        // Missing something the build shipped means the cache is not what
+        // install left behind. Rebuild it in the background so the next
+        // visit works offline again instead of staying one outage away
+        // from being unopenable.
+        void refill();
+      } catch {
+        // No cache to consult. The network is still worth trying.
+      }
 
       try {
         return await fetch(request);
