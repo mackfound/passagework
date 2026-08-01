@@ -10,8 +10,24 @@
 export const STRETCH_PROCESSOR = "passagework-stretch";
 
 export type ToWorklet =
-  /** Decoded PCM, one Float32Array per channel. Sent transferred. */
-  | { type: "source"; channels: Float32Array[] }
+  /**
+   * Decoded PCM for `id`, one Float32Array per channel. Sent transferred,
+   * kept under `id`, and made current.
+   */
+  | { type: "source"; id: string; channels: Float32Array[] }
+  /**
+   * Make an already-delivered source current. The whole point of holding
+   * more than one: this is a pointer move on the audio thread, where
+   * re-sending would be another decode and another transfer.
+   */
+  | { type: "select"; id: string }
+  /**
+   * Release held sources. The main thread owns the budget and decides;
+   * this side is storage. If the current source is in the list it is
+   * dropped too and the stretcher falls silent — that only happens on
+   * dispose, which is exactly what dispose means.
+   */
+  | { type: "evict"; ids: string[] }
   | { type: "play" }
   | { type: "pause" }
   | { type: "seek"; frame: number }

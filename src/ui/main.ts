@@ -112,7 +112,7 @@ interface UiState {
    * instead of in the strip. One at a time, like the strip's own message —
    * otherwise every card accumulates a note nobody reads again.
    */
-  note: { excerptId: string; message: string } | null;
+  note: { excerptId: string; message: string; at: number } | null;
   /** Newest last. Capped at LOG_LIMIT; the panel renders it reversed. */
   log: LogEntry[];
   logOpen: boolean;
@@ -282,10 +282,34 @@ function say(message: string, isError = false): void {
   renderStatus();
 }
 
+/**
+ * How long a card note stays. It confirms something that just happened —
+ * "saved", "linked foo.wav", "in → 0:12.34" — and once read it is only
+ * taking up the card. The log keeps it; the card does not need to.
+ *
+ * The lifetime lives here rather than in the stylesheet because the same
+ * number drives both the fade and the removal, and two copies would drift.
+ */
+const NOTE_LIFE_MS = 5000;
+
+let noteTimer: ReturnType<typeof setTimeout> | null = null;
+
 function note(excerptId: string, message: string): void {
-  S.note = { excerptId, message };
+  S.note = { excerptId, message, at: Date.now() };
   record(message, false);
+  if (noteTimer) clearTimeout(noteTimer);
+  noteTimer = setTimeout(clearNote, NOTE_LIFE_MS);
   renderStatus();
+}
+
+function clearNote(): void {
+  if (noteTimer) {
+    clearTimeout(noteTimer);
+    noteTimer = null;
+  }
+  if (!S.note) return;
+  S.note = null;
+  render();
 }
 
 /**
@@ -298,7 +322,7 @@ let paintedMessage: string | null = null;
 
 /** Drop the marginal note if it belongs to an excerpt that is gone. */
 function pruneNote(): void {
-  if (S.note && !S.doc.excerpts.some((e) => e.id === S.note!.excerptId)) S.note = null;
+  if (S.note && !S.doc.excerpts.some((e) => e.id === S.note?.excerptId)) clearNote();
 }
 
 function fmtTime(s: number): string {
@@ -1197,7 +1221,12 @@ async function loadIntoEngine(file: File, sourceId: string): Promise<void> {
   if (!slot) return;
   // Decoding a long recording takes seconds and blocks nothing visibly;
   // without this the app looks hung on the first trigger.
-  if (S.engineKind === "worklet") say(`decoding ${file.name} …`);
+  // Only when it will actually decode. A recording the worklet is already
+  // holding switches in instantly, and a "decoding …" that flashes for one
+  // frame teaches you to expect a wait that isn't there.
+  if (S.engineKind === "worklet" && !slot.engine.holds?.(sourceId)) {
+    say(`decoding ${file.name} …`);
+  }
 
   let loaded;
   try {
@@ -1543,7 +1572,16 @@ function renderCard(e: Excerpt): HTMLElement {
   }
   card.append(locus);
 
-  if (S.note?.excerptId === e.id) card.append(h("div", "note", S.note.message));
+  if (S.note?.excerptId === e.id) {
+    const noteEl = h("div", "note", S.note.message);
+    // render() rebuilds this element for reasons that have nothing to do
+    // with the note — a card click, a message on the strip — and each
+    // rebuild would restart the fade. Starting the animation already part
+    // way through puts it back where the clock says it should be.
+    noteEl.style.animationDuration = `${NOTE_LIFE_MS}ms`;
+    noteEl.style.animationDelay = `${S.note.at - Date.now()}ms`;
+    card.append(noteEl);
+  }
 
   // action buttons: selected card only; mouse is allowed during setup (§10)
   if (e.id === S.selectedId) {

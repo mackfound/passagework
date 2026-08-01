@@ -30,6 +30,13 @@ export interface LoadedSource {
 
 export interface PlaybackEngine {
   load(source: AudioSource): Promise<LoadedSource>;
+  /**
+   * True when `load` would answer this source from memory. Optional
+   * because it is only meaningful to an engine that decodes: a streaming
+   * engine has nothing to hold, and the caller treats absent as "no".
+   * The ui uses it to decide whether a load is worth warning about.
+   */
+  holds?(sourceId: string): boolean;
   play(): void;
   pause(): void;
   seek(seconds: Seconds): void;

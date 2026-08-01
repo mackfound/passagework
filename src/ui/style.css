@@ -567,6 +567,25 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* Duration and delay come from ui/main.ts, which owns the lifetime and
+     removes the element when it ends — a note is a confirmation, not a
+     status, and a card that keeps every one of them is a card you stop
+     reading. Under prefers-reduced-motion the animation is off and the
+     note simply disappears on the same schedule, which is the point. */
+  animation-name: note-expire;
+  animation-timing-function: ease-out;
+  animation-fill-mode: forwards;
+}
+
+@keyframes note-expire {
+  0%,
+  82% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
 }
 
 .excerpt .actions {

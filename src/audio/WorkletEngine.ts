@@ -16,6 +16,14 @@
  * and does not care how long the file is. Storing Int16 instead of Float32
  * would halve the footprint at no audible cost and is the obvious next move
  * if that limit ever bites; it changes this file and nothing else.
+ *
+ * Decoded recordings are kept, not discarded on the next load. A project
+ * whose excerpts point at different movements was re-decoding on every
+ * switch — seconds of silence to move between two passages, repeatedly,
+ * which is exactly the motion this app exists to make cheap. They now stay
+ * in the worklet and switching is a pointer swap. MAX_PCM_BYTES became the
+ * budget for all of them together rather than for one, so the ceiling did
+ * not move; past it the least recently used are released.
  */
 
 import type { Region, Seconds } from "../core";
@@ -36,9 +44,11 @@ import {
 import processorUrl from "./stretch-processor.ts?worker&url";
 
 /**
- * Refuse to decode beyond this. 900 MB of Float32 is about 39 minutes of
- * 48 kHz stereo — a symphony movement with room to spare, a full opera not.
- * The number is a memory ceiling, not a musical judgement; see the header.
+ * Total budget for every recording held at once. 900 MB of Float32 is about
+ * 39 minutes of 48 kHz stereo — a couple of symphony movements, not a full
+ * opera. A single recording larger than this is refused outright; several
+ * that overflow it together are released oldest-first instead. The number
+ * is a memory ceiling, not a musical judgement; see the header.
  */
 export const MAX_PCM_BYTES = 900_000_000;
 
@@ -96,6 +106,13 @@ export class WorkletEngine implements PlaybackEngine {
   private readonly sr: number;
   private playing = false;
   private posFrames = 0;
+  /**
+   * What the worklet is holding, by source id, with what it costs and what
+   * load() answered for it. Insertion order is the LRU order: a cache hit
+   * re-inserts, so the front is the coldest. The samples themselves live on
+   * the audio thread — only the bookkeeping is here.
+   */
+  private readonly held = new Map<string, { bytes: number; loaded: LoadedSource }>();
   private rafId: number | null = null;
   private tickCbs = new Set<(seconds: Seconds) => void>();
   private wrapCbs = new Set<() => void>();
@@ -148,7 +165,45 @@ export class WorkletEngine implements PlaybackEngine {
     else this.node.port.postMessage(msg);
   }
 
+  /** True when load() would answer from memory. See PlaybackEngine.holds. */
+  holds(sourceId: string): boolean {
+    return this.held.has(sourceId);
+  }
+
+  /**
+   * Release the oldest recordings until `incoming` more bytes fit. `keep`
+   * is the one being loaded now and is never a candidate — evicting it
+   * would decode a recording only to throw it away.
+   */
+  private makeRoom(incoming: number, keep: string): void {
+    let total = incoming;
+    for (const entry of this.held.values()) total += entry.bytes;
+    if (total <= MAX_PCM_BYTES) return;
+
+    const dropped: string[] = [];
+    // Map iterates in insertion order and a hit re-inserts, so the front
+    // is the least recently used.
+    for (const [id, entry] of this.held) {
+      if (id === keep) continue;
+      this.held.delete(id);
+      dropped.push(id);
+      total -= entry.bytes;
+      if (total <= MAX_PCM_BYTES) break;
+    }
+    if (dropped.length > 0) this.send({ type: "evict", ids: dropped });
+  }
+
   async load(source: AudioSource): Promise<LoadedSource> {
+    const hit = this.held.get(source.id);
+    if (hit) {
+      this.held.delete(source.id); // re-insert at the back: most recently used
+      this.held.set(source.id, hit);
+      this.send({ type: "select", id: source.id });
+      this.posFrames = 0;
+      this.playing = false;
+      return hit.loaded;
+    }
+
     const duration = await probeDuration(source.file);
     // Assume stereo for the estimate — the true channel count is only known
     // after decoding, which is the thing being guarded against.
@@ -179,19 +234,23 @@ export class WorkletEngine implements PlaybackEngine {
       buf.copyFromChannel(data, c);
       channels.push(data);
     }
+    const bytes = channels.reduce((n, a) => n + a.byteLength, 0);
+    this.makeRoom(bytes, source.id);
     this.send(
-      { type: "source", channels },
+      { type: "source", id: source.id, channels },
       channels.map((a) => a.buffer),
     );
     this.posFrames = 0;
     this.playing = false;
 
-    return {
+    const loaded: LoadedSource = {
       id: source.id,
       duration: buf.duration,
       sampleRate: buf.sampleRate,
       channels: buf.numberOfChannels,
     };
+    this.held.set(source.id, { bytes, loaded });
+    return loaded;
   }
 
   play(): void {
@@ -249,8 +308,10 @@ export class WorkletEngine implements PlaybackEngine {
     this.send({ type: "pause" });
     // Hand back the PCM explicitly rather than waiting for the node to be
     // collected. Switching engines on a symphony would otherwise hold most
-    // of a gigabyte until the collector got round to it.
-    this.send({ type: "source", channels: [] });
+    // of a gigabyte until the collector got round to it — and with several
+    // recordings held, that much again per recording.
+    if (this.held.size > 0) this.send({ type: "evict", ids: [...this.held.keys()] });
+    this.held.clear();
     this.node.port.onmessage = null;
     this.node.disconnect();
     this.tickCbs.clear();
