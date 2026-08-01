@@ -783,7 +783,9 @@ async function completeLink(
   } else if (!persistent) {
     say(`linked for this session: ${file.name} — re-link after a restart`, true);
   } else {
-    note(exc.id, `linked ${file.name}`);
+    // Strip, not card: a confirmation, not authoring feedback. It names the
+    // excerpt because the strip has no card to be next to.
+    say(`linked to "${exc.title ?? exc.label}": ${file.name}`);
   }
   render();
 }
@@ -823,7 +825,9 @@ function applyImageAsset(excerptId: string, role: "part" | "score", data: AssetD
   S.imageRole = role;
   S.linkModal.open = false;
   // asset mode must be visible, not silent (§5)
-  note(excerptId, `${role} image attached (${data.kind === "inline" ? "inline" : "file-backed"})`);
+  // Unnamed on purpose: images attach from the selected card only, and the
+  // stage is already showing the thing that just arrived.
+  say(`${role} image attached (${data.kind === "inline" ? "inline" : "file-backed"})`);
   render();
   void renderImage();
 }
@@ -1059,7 +1063,8 @@ function saveExcerptFields(rawLabel: string, rawTitle: string, rawHotkey: string
     S.selectedId = exc.id;
     S.app.selectedExcerptId = exc.id;
     persistApp();
-    note(exc.id, "press L to link its recording");
+    // Named: a new card has just appeared in the row and this says which.
+    say(`added "${title || label}" — press L to link its recording`);
   } else {
     const exc = S.doc.excerpts.find((e) => e.id === S.editor.excerptId);
     if (!exc) return "excerpt no longer exists";
