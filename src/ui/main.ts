@@ -2485,20 +2485,10 @@ async function requestPersistence(): Promise<void> {
 void boot();
 
 /**
- * Offline shell (src/sw.js). Production only: in dev a worker would serve
- * yesterday's bundle back and make HMR lie about what you just edited.
- *
- * Fire-and-forget, never awaited, failures swallowed. Registration fails on
- * plain http, in some private windows, and wherever workers are disabled —
- * and in every one of those cases the app must behave exactly as it does
- * now. Offline support is an improvement to a working tool, never a
- * dependency of one.
+ * Nothing registers a service worker any more — see src/sw.js. The file is
+ * still built and served, but only so that browsers already holding the
+ * withdrawn one can find its replacement and let themselves out.
  */
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    void navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {});
-  });
-}
 
 // Dev-only introspection for scripted E2E checks; stripped from prod builds.
 if (import.meta.env.DEV) {

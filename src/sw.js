@@ -1,180 +1,46 @@
 /**
- * Offline shell cache.
+ * Recovery worker. It exists to remove itself.
  *
- * Plain JavaScript, not TypeScript: this file is never bundled. Vite's
- * plugin (see vite.config.ts) reads it as a template, substitutes the two
- * placeholders below with the real build manifest, and writes the result to
- * dist/sw.js. tsconfig only includes typed sources, so nothing here is
- * type-checked — which is the price of it being sixty lines of standard
- * worker API rather than a build target of its own.
+ * This file used to precache the app shell for offline use. That cost more
+ * than it bought: it made the site unopenable twice, on a real machine, in
+ * ways that looked to the user like the domain had stopped existing — and
+ * a practice tool you cannot open is worse than one that needs the network
+ * to start. Offline support is worth having, but not on trust, and not
+ * before it can be tested against the states that actually broke it.
  *
- * WHAT IT CACHES: the application shell, and nothing else. Your recordings
- * and score images never pass through here. They arrive as File objects
- * from a picker or a drag, become blob: URLs, and blob: URLs do not reach a
- * service worker's fetch handler at all. The guards below make that
- * structural rather than incidental — the worker declines anything that
- * isn't a same-origin GET for a file this build shipped.
+ * Simply not registering a worker would not have been enough. A browser
+ * already holding a broken registration cannot be reached by any change to
+ * the page, because the broken worker is the thing stopping the page from
+ * loading. What a browser does still do is re-fetch this file to check for
+ * an update — that request goes to the network, not through the worker —
+ * so this is the one piece of code that can reach a stuck browser and let
+ * it out.
+ *
+ * Hence the shape: take over at once rather than waiting for the tabs that
+ * cannot load, drop everything the old worker cached, unregister, and
+ * reload whatever windows are open so the site simply appears.
+ *
+ * There is deliberately no fetch handler. A worker that intercepts nothing
+ * cannot fail a request, which is the entire failure mode being retired.
+ *
+ * To restore offline support, revert the commit that added this file: the
+ * precache worker, its build-time manifest, and the registration all go
+ * back together. Do it behind the DevTools checks in the README first.
  */
 
-const VERSION = "__VERSION__";
-const CACHE = `passagework-${VERSION}`;
+// Do not wait for existing clients. The tabs this needs to rescue are the
+// ones failing to load, and waiting on them would wait forever.
+self.addEventListener("install", () => self.skipWaiting());
 
-/** Every file this build emitted, relative to the worker's own directory. */
-const PRECACHE = __PRECACHE__;
-
-/** Navigations ask for the directory; the shell that answers them. */
-const SHELL = "index.html";
-
-/**
- * Ignore Vary when matching, and do not remove this.
- *
- * Static hosts commonly answer with `Vary: Origin`, and the cache honours
- * Vary by default: a stored entry only matches a request whose listed
- * headers agree. Vite marks the module script and stylesheet `crossorigin`,
- * so the browser requests them in CORS mode and sends an `Origin` header —
- * which the precache fetch never sent. Every lookup for exactly those two
- * files missed, fell through to the network, and failed offline while the
- * fonts and the shell loaded fine, because nothing marks them crossorigin.
- *
- * Ignoring Vary is correct here rather than merely convenient: this cache
- * holds one build of static files that are byte-identical whoever asks for
- * them. There is no content negotiation to preserve.
- */
-const MATCH = { ignoreVary: true };
-
-/**
- * Fetch the whole shell up front. addAll is atomic: one failure rejects the
- * install and leaves no cache at all, which is the right outcome — a
- * half-populated cache would serve an app missing its worklet and fail in
- * a much more confusing place than "offline doesn't work yet".
- *
- * Deliberately no skipWaiting(). A new worker waits for the old page to go
- * away rather than swapping the cache under a running session. This app
- * fetches its AudioWorklet module lazily, the first time the seamless
- * engine is built, so an activation mid-session could purge the hashed file
- * the page is about to ask for. The cost is that an update lands on the
- * next launch instead of this one — for a practice tool, that is nothing.
- */
-self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(PRECACHE)));
-});
-
-/**
- * Drop every older version. Cache names carry the content hash, so this is
- * the entire eviction policy: exactly one build is held at a time.
- *
- * claim() without skipWaiting() is not a contradiction. Without a previous
- * worker there is nothing to wait for, so this runs on the very first
- * visit and takes control of the page that just registered it — meaning
- * the first time you open the app offline is the second visit, not the
- * third. On an *update* the wait still applies, because the old worker is
- * still controlling clients.
- */
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches
-      .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim()),
-  );
-});
-
-/**
- * Put the shell back.
- *
- * A successful install is not a promise that the cache stays. Browsers
- * evict storage for origins they consider disposable, and an evicted
- * precache leaves this worker controlling an origin it can no longer
- * serve. One attempt at a time; failures are swallowed because the next
- * request will try again, and a rejection here must never reach a
- * respondWith.
- */
-let refilling = null;
-function refill() {
-  refilling ??= caches
-    .open(CACHE)
-    .then((cache) => cache.addAll(PRECACHE))
-    .catch(() => {})
-    .finally(() => {
-      refilling = null;
-    });
-  return refilling;
-}
-
-/** Last resort for a navigation with nothing cached and no network. */
-function offlineShell() {
-  // No styling: a future Content-Security-Policy would strip an inline
-  // style anyway, and legibility is the only requirement here.
-  return new Response(
-    "<!doctype html><meta charset=utf-8><title>Passagework</title>" +
-      "<h1>Passagework</h1><p>Can't reach the network, and this build isn't cached yet." +
-      "<p>Reconnect and reload.",
-    { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } },
-  );
-}
-
-/**
- * Cache-first, with no runtime caching of misses — and never a rejection.
- *
- * Cache-first is safe because asset filenames carry a content hash: a stale
- * hit is impossible, since changed content means a changed name. And a miss
- * is by definition not part of the shell, so writing it into the cache
- * would grow it without bound and cache things this build never promised.
- *
- * The rejection part is the lesson. respondWith() given a promise that
- * rejects fails the request outright — the browser shows a bare ERR_FAILED
- * with no offline page and no explanation. The first version of this
- * handler could reach that state: `hit ?? fetch(request)` with an empty
- * cache and an unreachable network rejects, and because it happens on the
- * navigation itself, the app becomes unopenable with no way in to repair
- * it. A worker controlling an origin it cannot serve is worse than no
- * worker at all, so every path below now ends in a Response, and a cache
- * miss also triggers a refill rather than quietly depending on the network
- * forever.
- */
-self.addEventListener("fetch", (event) => {
-  const request = event.request;
-
-  // Not ours to answer: writes, other origins, and range requests. The last
-  // matters most — media elements ask for byte ranges, and answering one
-  // with a whole cached 200 breaks playback in ways that look like a codec
-  // bug. The shell contains no media, so declining costs nothing.
-  if (request.method !== "GET") return;
-  if (new URL(request.url).origin !== self.location.origin) return;
-  if (request.headers.has("range")) return;
-
-  // A navigation to the directory, to index.html, or to any path under the
-  // scope resolves to the one shell this app has.
-  const key = request.mode === "navigate" ? SHELL : request;
-
-  event.respondWith(
     (async () => {
-      // Two separate try blocks, not one .catch() per call. A .catch()
-      // only handles a rejected promise, and CacheStorage can fail harder
-      // than that: where site data is blocked outright, `caches` is
-      // undefined and `caches.match` throws synchronously before there is
-      // a promise to attach anything to. Inside an async function that is
-      // still a rejection, and a rejection reaching respondWith is the
-      // whole bug this handler exists to not have.
-      try {
-        const hit = await caches.match(key, MATCH);
-        if (hit) return hit;
-
-        // Missing something the build shipped means the cache is not what
-        // install left behind. Rebuild it in the background so the next
-        // visit works offline again instead of staying one outage away
-        // from being unopenable.
-        void refill();
-      } catch {
-        // No cache to consult. The network is still worth trying.
-      }
-
-      try {
-        return await fetch(request);
-      } catch {
-        return request.mode === "navigate"
-          ? offlineShell()
-          : new Response("", { status: 504, statusText: "offline" });
+      for (const key of await caches.keys()) await caches.delete(key);
+      await self.registration.unregister();
+      // Reload open windows so recovery looks like the site working again
+      // rather than something the user has to know to do.
+      for (const client of await self.clients.matchAll({ type: "window" })) {
+        client.navigate(client.url);
       }
     })(),
   );

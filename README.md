@@ -37,8 +37,6 @@ Open it, hit one key, the passage loops.
   stand is across the room rather than in front of you.
 - **Pre-roll.** Entering a passage starts a beat or two early so you hear the approach.
   Loop wraps go to the loop point itself, not the pre-roll.
-- **Works offline.** After one visit the whole app is cached on your machine. A practice
-  room with no signal is the normal case, not an edge case.
 - **Nothing to sign into.** No account, no sync, no telemetry.
 
 ## No backend
@@ -54,13 +52,18 @@ takes one line to check.
 grep -rn "fetch(\|XMLHttpRequest\|WebSocket\|sendBeacon" src/
 ```
 
-A service worker caches the app itself on first load, so it opens with no network after
-that. It only ever holds files the build shipped — your audio never reaches it, since blob
-URLs don't pass through a service worker at all.
+Loading the page needs the network; nothing after that does. A service worker used to
+cache the app so it opened with no connection at all, and it was withdrawn — it made the
+site unopenable twice on a real machine, in a way that looked from the outside like the
+domain had stopped existing. Offline support is worth having back, but not on trust. See
+Coming soon.
 
-Projects are only as durable as the browser profile they live in, so **Export to JSON** is
-the real backup. It writes a small, readable, diffable file of timings rather than audio,
-and re-importing it asks you to point at the recordings again.
+Projects are only as durable as the browser profile they live in. The app asks the browser
+to treat its storage as persistent, and says in the status bar when that is refused —
+browsers evict storage from origins they consider disposable, and that takes your projects,
+not just a cache. **Export to JSON** is the real backup either way: a small, readable,
+diffable file of timings rather than audio, which on re-import asks you to point at the
+recordings again.
 
 ## Getting started
 
@@ -84,7 +87,8 @@ cd passagework && npm install && npm run dev
 `npm run build` type-checks and writes a static `dist/`. Every URL it emits is relative, so
 the same build works at a domain root, at a GitHub Pages project path like `/passagework/`,
 or in any subdirectory — there's nothing to configure per deploy. The build also generates
-`dist/sw.js`, the offline cache, with that build's file list and a content hash baked in.
+`dist/sw.js`, which now exists only to unregister the withdrawn service worker from
+browsers that still hold it.
 
 Built for Chromium desktop; Firefox and Safari run it, but without the File System Access
 API a linked recording has to be re-selected each session.
@@ -161,6 +165,12 @@ ordinary key events.
 
 ## Coming soon
 
+- **Offline support, done properly.** The first attempt shipped a precaching service
+  worker and was withdrawn: a worker that outlives its own cache ends up controlling an
+  origin it cannot serve, and the browser reports that as a bare `ERR_FAILED` — which
+  reads, to anyone not holding a debugger, as the site no longer existing. Bringing it
+  back means testing the states that broke it, not the happy path: an evicted cache, a
+  blocked-storage profile, a stale worker script, all with the network down.
 - **Practice features** — metronome, count-in, tempo ladder, rep counting, and a session
   log. The schema has carried unused `tempo`, `tags` and `notes` fields since the first
   commit, so these arrive without a migration.
