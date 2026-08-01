@@ -182,14 +182,34 @@ body {
 
 /* ---- header: one row, no second line, no status text (§3c) ---- */
 
+/* Three columns rather than flex with spacers, so the middle cell sits at
+   the true centre of the bar. Two flex spacers only centre it between the
+   groups either side, which means it drifts sideways whenever the project
+   name changes length — a control that moves when you rename something is
+   a control you have to look for. minmax(0, …) lets the outer columns fall
+   below their content width so the project name ellipsizes on a narrow
+   window instead of shoving the help glyph off the edge. */
 .header {
   flex: none;
   height: 52px;
   padding: 0 22px;
   border-bottom: 1px solid var(--hairline);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 22px;
+}
+
+.header-left,
+.header-right {
   display: flex;
   align-items: center;
   gap: 22px;
+  min-width: 0;
+}
+
+.header-right {
+  justify-content: flex-end;
 }
 
 .header .brand {
@@ -238,21 +258,99 @@ body {
   flex: none;
 }
 
-/* 9×6 triangle drawn in CSS: no glyph to fall back on, no icon font */
+/* Two 9×5 triangles drawn in CSS: no glyph to fall back on, no icon font.
+   Up-and-down rather than a lone downward one, which is the dropdown
+   convention and promises a list unrolling directly beneath it. This opens
+   a dialog in the middle of the screen. The stacked pair is the pop-up
+   button convention instead — "the value beside me can be exchanged for
+   another one" — which is what the project library is for, and it makes no
+   claim about where the surface it opens will appear. */
 .chevron {
   flex: none;
+  position: relative;
   width: 9px;
-  height: 6px;
+  height: 13px;
+}
+
+.chevron::before,
+.chevron::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 9px;
+  height: 5px;
   background: var(--faint);
+}
+
+.chevron::before {
+  top: 0;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.chevron::after {
+  bottom: 0;
   clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
 
-.header .session-menu:hover .chevron {
+.header .session-menu:hover .chevron::before,
+.header .session-menu:hover .chevron::after {
   background: var(--gold);
 }
 
-.header .spacer {
-  flex: 1;
+/* ---- score zoom ----
+ * Built like the toggle strip so the header reads as two of the same kind
+ * of control rather than two unrelated inventions. Steppers take Text size
+ * because a lone glyph at Label size reads as a speck; the readout keeps
+ * Label, where it matches the toggles opposite it.
+ */
+.zoomstrip {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  height: 26px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.zoomstrip button {
+  flex: none;
+  background: none;
+  border: none;
+  border-left: 1px solid var(--hairline);
+  color: var(--dim);
+  cursor: pointer;
+  padding: 0 11px;
+  line-height: 1;
+}
+
+.zoomstrip button:first-child {
+  border-left: none;
+}
+
+.zoomstrip .zoomstep {
+  font-family: "Lora", Georgia, serif;
+  font-size: var(--text);
+}
+
+/* reserved, so stepping 100 → 125 → 156 never nudges the steppers sideways */
+.zoomstrip .zoomlevel {
+  min-width: 58px;
+}
+
+.zoomstrip button:hover:not(:disabled) {
+  background: var(--hover-tint);
+  color: var(--fg);
+}
+
+.zoomstrip button:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+/* inside overflow: hidden, an outset ring is clipped away */
+.zoomstrip button:focus-visible {
+  outline-offset: -2px;
 }
 
 .header .session-edit {
@@ -376,6 +474,19 @@ body {
   align-items: center;
   justify-content: center;
   padding: 14px 22px;
+  /* a zoomed page has to be cropped by the stage, not spill over the
+     header and the excerpt row */
+  overflow: hidden;
+}
+
+/* Only once there is something to drag. At fit the page is whole and the
+   grab cursor would promise a movement that does nothing. */
+.stage.zoomed {
+  cursor: grab;
+}
+
+.stage.panning {
+  cursor: grabbing;
 }
 
 .stage img {
@@ -384,6 +495,10 @@ body {
   object-fit: contain;
   /* score scans are near-white; keep them readable but not blinding */
   filter: brightness(0.92);
+  transform-origin: center center;
+  /* the image is dragged around; letting the pointer lift it is noise */
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .stage .placeholder {

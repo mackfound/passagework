@@ -97,7 +97,11 @@ export const KEYMAP_HELP: readonly KeyHelp[] = [
   { keys: "P", description: "pre-roll on / off", covers: ["p"] },
   { keys: "Tab", description: "switch between the part and score images", covers: ["tab"] },
   { keys: "W", description: "waveform: drag to set loop points, click to seek", covers: ["w"] },
-  { keys: "− / =", description: "zoom the waveform out / in", covers: ["-", "="] },
+  {
+    keys: "− / =",
+    description: "zoom the score out / in — the waveform instead, while it's open",
+    covers: ["-", "="],
+  },
   { keys: "L", description: "link or replace this excerpt's recording", covers: ["l"] },
 ];
 

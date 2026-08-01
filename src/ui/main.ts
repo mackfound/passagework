@@ -103,6 +103,13 @@ interface UiState {
   draftStart: number | null; // tap-in awaiting its tap-out
   preRollEnabled: boolean;
   imageRole: "part" | "score";
+  /**
+   * Score zoom: 1 is fitted to the stage, and `pan` is the offset from
+   * centre in screen pixels. Session state, not persisted — it describes
+   * how far away you are sitting, not anything about the project.
+   */
+  zoom: number;
+  pan: { x: number; y: number };
   message: string;
   messageIsError: boolean;
   /** When the strip's current message arrived. Drives its timestamp. */
@@ -154,6 +161,16 @@ interface LogEntry {
 
 /** Enough to scroll back through a practice session, bounded so it can't grow. */
 const LOG_LIMIT = 200;
+
+/**
+ * Score zoom bounds. The floor is fit-to-stage — there is no reason to see
+ * less of a page than already fits — and 5× is roughly where one system of
+ * a full orchestral page fills the screen, which is as far in as reading
+ * from across a room ever needs.
+ */
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 5;
+const ZOOM_STEP = 1.25;
 
 /** What the link modal is linking: one excerpt's recording, or its image slot. */
 type LinkTarget =
@@ -370,6 +387,9 @@ function selectExcerpt(exc: Excerpt): void {
   persistApp();
   S.draftStart = null;
   S.imageRole = exc.assets.some((a) => a.role === "part") ? "part" : "score";
+  // The zoom stays — it is how far away you are sitting, which hasn't
+  // changed — but the pan pointed at a system on a page you have left.
+  S.pan = { x: 0, y: 0 };
   S.view = null; // re-fit the waveform to this excerpt's region
   S.engine?.setRate(rateFor(exc));
   void renderImage();
@@ -532,6 +552,7 @@ function toggleImage(): void {
   const exc = selected();
   if (!exc) return;
   S.imageRole = S.imageRole === "part" ? "score" : "part";
+  S.pan = { x: 0, y: 0 }; // a different page; the old offset means nothing on it
   void renderImage();
 }
 
@@ -605,14 +626,172 @@ function toggleWaveform(): void {
   render();
 }
 
+/**
+ * One pair of keys, two panels.
+ *
+ * The waveform is an authoring surface you open deliberately and close
+ * again; while it is up it owns the zoom, and the rest of the time the
+ * score does. They are never both the thing being looked at, so this needs
+ * no second binding — and every key the fixed map claims is one an excerpt
+ * can no longer be bound to.
+ */
 function zoomIntent(dir: 1 | -1): void {
-  if (!S.waveformOpen || !S.peaks) return;
+  if (!S.waveformOpen) {
+    zoomScore(dir);
+    return;
+  }
+  if (!S.peaks) return;
   const duration = S.duration ?? 0;
   // Anchor on the playhead, not the window centre: while looping, the
   // interesting moment is where playback is.
   const anchor = S.engine?.getPosition() ?? currentView().start;
   S.view = zoomView(currentView(), dir === 1 ? 0.7 : 1 / 0.7, anchor, duration);
   render();
+}
+
+// ---------- score zoom ----------
+
+/** The live <img> on the stage, so zooming needn't re-render (and re-fetch). */
+let stageImg: HTMLImageElement | null = null;
+/** The header readout and its two steppers, updated in place for the same reason. */
+let zoomEls: { label: HTMLButtonElement; out: HTMLButtonElement; in: HTMLButtonElement } | null =
+  null;
+
+/** The stage's content box — its padding is not somewhere the page may sit. */
+function stageBox(): { el: HTMLElement; width: number; height: number } | null {
+  const el = app.querySelector<HTMLElement>(".stage");
+  if (!el) return null;
+  const cs = getComputedStyle(el);
+  return {
+    el,
+    width: el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
+    height: el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom),
+  };
+}
+
+/**
+ * Push zoom and pan onto the image and the header readout.
+ *
+ * Deliberately not a render(): rebuilding the stage assigns img.src again,
+ * and a page that blinks white on every zoom step would be unusable. This
+ * is the one place that writes the transform.
+ */
+function applyZoom(): void {
+  const box = stageBox();
+  const live = Boolean(stageImg?.isConnected);
+  if (box) box.el.classList.toggle("zoomed", live && S.zoom > ZOOM_MIN);
+
+  if (stageImg && box) {
+    // Clamp so the page can never be dragged off the stage: at a given
+    // zoom it overhangs by half the excess on each side, and an axis that
+    // still fits has no slack at all.
+    const slackX = Math.max(0, (stageImg.clientWidth * S.zoom - box.width) / 2);
+    const slackY = Math.max(0, (stageImg.clientHeight * S.zoom - box.height) / 2);
+    S.pan.x = Math.min(slackX, Math.max(-slackX, S.pan.x));
+    S.pan.y = Math.min(slackY, Math.max(-slackY, S.pan.y));
+    // Source order means the translate is applied last, in screen pixels,
+    // so a drag moves the page exactly as far as the pointer travelled at
+    // any zoom rather than by a scaled fraction of it.
+    stageImg.style.transform = `translate(${S.pan.x}px, ${S.pan.y}px) scale(${S.zoom})`;
+  }
+
+  if (zoomEls) {
+    zoomEls.label.textContent = `${Math.round(S.zoom * 100)}%`;
+    zoomEls.label.disabled = !live;
+    zoomEls.out.disabled = !live || S.zoom <= ZOOM_MIN + 1e-6;
+    zoomEls.in.disabled = !live || S.zoom >= ZOOM_MAX - 1e-6;
+  }
+}
+
+/**
+ * @param anchor A viewport point to hold still, for pinch. Absent zooms
+ *        about the centre, which is what a keypress or a button should do.
+ */
+function setZoom(next: number, anchor?: { x: number; y: number }): void {
+  const from = S.zoom;
+  const to = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next));
+  if (to === from) return;
+  const box = stageBox();
+  if (anchor && box) {
+    const rect = box.el.getBoundingClientRect();
+    const dx = anchor.x - (rect.left + rect.width / 2);
+    const dy = anchor.y - (rect.top + rect.height / 2);
+    // Keep what is under the pointer under the pointer: the pointer's
+    // offset from centre stays fixed while the image-space point beneath
+    // it is rescaled about it.
+    S.pan.x = dx - ((dx - S.pan.x) * to) / from;
+    S.pan.y = dy - ((dy - S.pan.y) * to) / from;
+  }
+  S.zoom = to;
+  // Back at fit, any pan would be clamped to nothing anyway; zeroing it
+  // means zooming out and in again starts from the page, not from wherever
+  // the last drag left off.
+  if (to === ZOOM_MIN) S.pan = { x: 0, y: 0 };
+  applyZoom();
+}
+
+function zoomScore(dir: 1 | -1): void {
+  setZoom(dir === 1 ? S.zoom * ZOOM_STEP : S.zoom / ZOOM_STEP);
+}
+
+function zoomReset(): void {
+  S.pan = { x: 0, y: 0 };
+  setZoom(ZOOM_MIN);
+  applyZoom(); // setZoom returns early when already at fit; the pan still moved
+}
+
+/**
+ * Pinch to zoom, drag to pan.
+ *
+ * A trackpad pinch arrives as a wheel event with ctrlKey set — Chromium has
+ * no separate gesture event — which is why this cannot simply be a scroll
+ * handler. A plain wheel pans instead, since that is what scrolling over a
+ * page larger than its frame should do.
+ */
+function attachStageZoom(stage: HTMLElement): void {
+  stage.addEventListener(
+    "wheel",
+    (ev) => {
+      if (!stageImg) return;
+      if (ev.ctrlKey) {
+        ev.preventDefault();
+        // Exponential so a gentle pinch stays gentle and a firm one scales
+        // proportionally, rather than a fixed step that feels wrong at both.
+        setZoom(S.zoom * Math.exp(-ev.deltaY / 180), { x: ev.clientX, y: ev.clientY });
+        return;
+      }
+      if (S.zoom <= ZOOM_MIN) return; // nothing overhangs; let the page be
+      ev.preventDefault();
+      S.pan.x -= ev.deltaX;
+      S.pan.y -= ev.deltaY;
+      applyZoom();
+    },
+    { passive: false },
+  );
+
+  let drag: { id: number; x: number; y: number } | null = null;
+  stage.addEventListener("pointerdown", (ev) => {
+    if (!stageImg || ev.button !== 0 || S.zoom <= ZOOM_MIN) return;
+    drag = { id: ev.pointerId, x: ev.clientX, y: ev.clientY };
+    stage.setPointerCapture(ev.pointerId);
+    stage.classList.add("panning");
+  });
+  stage.addEventListener("pointermove", (ev) => {
+    if (!drag || ev.pointerId !== drag.id) return;
+    S.pan.x += ev.clientX - drag.x;
+    S.pan.y += ev.clientY - drag.y;
+    drag.x = ev.clientX;
+    drag.y = ev.clientY;
+    applyZoom();
+  });
+  const release = (ev: PointerEvent) => {
+    if (!drag || ev.pointerId !== drag.id) return;
+    stage.releasePointerCapture(drag.id);
+    drag = null;
+    stage.classList.remove("panning");
+  };
+  stage.addEventListener("pointerup", release);
+  stage.addEventListener("pointercancel", release);
 }
 
 /**
@@ -922,6 +1101,7 @@ function adoptDoc(doc: ProjectDoc): void {
   S.duration = null;
   S.draftStart = null;
   S.imageRole = "part";
+  S.pan = { x: 0, y: 0 };
   // Peaks belong to the outgoing project's source; drop them rather than
   // draw the previous recording under the new project's excerpts.
   S.peaks = null;
@@ -1027,6 +1207,12 @@ async function deleteActiveProject(): Promise<void> {
     adoptDoc(await loadOrSeedProject());
   }
   say(`deleted "${deadName}"`);
+  // Straight back to the library, which adoptDoc has just closed. A line of
+  // text at the bottom of the screen is a thin acknowledgement that a
+  // project is gone; the list it is no longer in says it properly, and it
+  // puts the choice of where to go next in front of you rather than
+  // depositing you in whichever project happened to be next in storage.
+  openLibrary();
 }
 
 // ---------- excerpt editor (M2) ----------
@@ -1360,6 +1546,7 @@ function render(): void {
   // stage
   const stage = h("div", "stage");
   stage.append(h("div", "placeholder", "no image for this excerpt yet"));
+  attachStageZoom(stage);
   app.append(stage);
   void renderImage();
 
@@ -1426,7 +1613,10 @@ function render(): void {
  */
 function renderHeader(): HTMLElement {
   const bar = h("div", "header");
-  bar.append(h("span", "brand", APP_NAME));
+  // Three cells: the grid is what puts the zoom control at the true centre
+  // of the bar rather than midway between whatever flanks it.
+  const left = h("div", "header-left");
+  left.append(h("span", "brand", APP_NAME));
 
   // One visual unit, two targets. Merging them into a single button cost
   // the rename its click — it became a double-click nobody would guess at,
@@ -1447,12 +1637,15 @@ function renderHeader(): HTMLElement {
     openLibrary();
   });
   session.append(nameBtn, menuBtn);
-  bar.append(session);
+  left.append(session);
+  bar.append(left);
 
-  bar.append(h("div", "spacer"));
-  bar.append(renderToggles());
-  bar.append(renderRate());
-  bar.append(h("span", "rule"));
+  bar.append(renderZoom());
+
+  const right = h("div", "header-right");
+  right.append(renderToggles());
+  right.append(renderRate());
+  right.append(h("span", "rule"));
 
   // The only thing on screen that advertises a key at all.
   const helpBtn = h("button", "helpbtn", "?");
@@ -1463,7 +1656,8 @@ function renderHeader(): HTMLElement {
     helpBtn.blur(); // keys stay global; a focus ring here would eat Space
     toggleHelp();
   });
-  bar.append(helpBtn);
+  right.append(helpBtn);
+  bar.append(right);
   return bar;
 }
 
@@ -1541,6 +1735,52 @@ function renderRate(): HTMLElement {
     { passive: false },
   );
   return figure;
+}
+
+/**
+ * Score zoom, centred in the header and shaped like the toggle strip so
+ * the two read as the same class of control at opposite ends of the bar.
+ *
+ * It stays put and greys out when the stage has no image rather than
+ * disappearing: a control that comes and went as you moved between
+ * excerpts would be one more thing moving on a screen that is supposed to
+ * hold still. The middle cell is both the readout and the way back to fit.
+ */
+function renderZoom(): HTMLElement {
+  const strip = h("div", "zoomstrip");
+  const step = (glyph: string, title: string, onClick: () => void) => {
+    const btn = h("button", "zoomstep", glyph);
+    btn.type = "button";
+    btn.title = title;
+    btn.addEventListener("click", () => {
+      btn.blur(); // keys stay global; a focus ring here would eat Space
+      onClick();
+    });
+    strip.append(btn);
+    return btn;
+  };
+
+  const out = step("−", "zoom out — or press −", () => zoomScore(-1));
+  const label = h("button", "zoomlevel t-label tnum", `${Math.round(S.zoom * 100)}%`);
+  label.type = "button";
+  label.title = "fit the page to the screen";
+  label.addEventListener("click", () => {
+    label.blur();
+    zoomReset();
+  });
+  strip.append(label);
+  const zin = step("+", "zoom in — or press =", () => zoomScore(1));
+
+  // Best guess until renderImage lands and calls applyZoom with the truth.
+  // Reading stageImg here would be wrong: it still points at the previous
+  // render's element, which this render has already thrown away.
+  const likely = (selected()?.assets.length ?? 0) > 0;
+  label.disabled = !likely;
+  out.disabled = !likely || S.zoom <= ZOOM_MIN + 1e-6;
+  zin.disabled = !likely || S.zoom >= ZOOM_MAX - 1e-6;
+
+  zoomEls = { label, out, in: zin };
+  return strip;
 }
 
 function renderCard(e: Excerpt): HTMLElement {
@@ -1947,8 +2187,10 @@ async function renderImage(): Promise<void> {
   if (!stage) return;
   const exc = selected();
   stage.textContent = "";
+  stageImg = null; // every early return below leaves the stage unzoomable
   if (!exc) {
     stage.append(h("div", "placeholder", "select an excerpt"));
+    applyZoom();
     return;
   }
   const use = exc.assets.find((a) => a.role === S.imageRole) ?? exc.assets[0];
@@ -1957,17 +2199,25 @@ async function renderImage(): Promise<void> {
     stage.append(
       h("div", "placeholder", `no ${S.imageRole} image yet — attach one on the excerpt card below`),
     );
+    applyZoom();
     return;
   }
   const url = await resolveAssetUrl(data);
   if (!url) {
     stage.append(h("div", "placeholder", `${S.imageRole} image is file-backed and unavailable — re-attach it`));
+    applyZoom();
     return;
   }
   const img = h("img");
   img.src = url;
   img.alt = `${exc.label} — ${use.role}`;
   stage.append(img);
+  stageImg = img;
+  // Twice on purpose: now, so a cached image that is already sized never
+  // shows unzoomed for a frame, and again on load, because the pan clamp
+  // needs a layout box and there isn't one until the image has decoded.
+  applyZoom();
+  img.addEventListener("load", applyZoom, { once: true });
 }
 
 function attachImage(exc: Excerpt, role: "part" | "score"): void {
@@ -2125,6 +2375,8 @@ async function boot(): Promise<void> {
     draftStart: null,
     preRollEnabled: true,
     imageRole: "part",
+    zoom: ZOOM_MIN,
+    pan: { x: 0, y: 0 },
     message: "",
     messageIsError: false,
     messageAt: null,
