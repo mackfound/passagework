@@ -172,6 +172,13 @@ ordinary key events.
   leaves nothing free to move focus with. That binding needs to move.
 - **Self-recording and A/B** — capture a take against an excerpt and toggle between it and
   the reference at the same loop points.
+- **A Content-Security-Policy**, so "no backend" becomes something the browser enforces
+  rather than something you take on trust. `connect-src 'none'` is the line that matters,
+  there being nothing
+  for this app to connect to. It needs `img-src` and `media-src` opened to `blob:` and
+  `data:`, since that is how your own files reach the page, but no `'unsafe-inline'`
+  anywhere — nothing here writes a style attribute. It belongs in `_headers` rather than a
+  `<meta>` tag, so it covers the deployed build without breaking the dev server.
 
 ## Fonts
 
