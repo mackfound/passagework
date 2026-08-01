@@ -80,13 +80,57 @@ self.addEventListener("activate", (event) => {
 });
 
 /**
- * Cache-first, with no runtime caching of misses.
+ * Put the shell back.
+ *
+ * A successful install is not a promise that the cache stays. Browsers
+ * evict storage for origins they consider disposable, and an evicted
+ * precache leaves this worker controlling an origin it can no longer
+ * serve. One attempt at a time; failures are swallowed because the next
+ * request will try again, and a rejection here must never reach a
+ * respondWith.
+ */
+let refilling = null;
+function refill() {
+  refilling ??= caches
+    .open(CACHE)
+    .then((cache) => cache.addAll(PRECACHE))
+    .catch(() => {})
+    .finally(() => {
+      refilling = null;
+    });
+  return refilling;
+}
+
+/** Last resort for a navigation with nothing cached and no network. */
+function offlineShell() {
+  // No styling: a future Content-Security-Policy would strip an inline
+  // style anyway, and legibility is the only requirement here.
+  return new Response(
+    "<!doctype html><meta charset=utf-8><title>Passagework</title>" +
+      "<h1>Passagework</h1><p>Can't reach the network, and this build isn't cached yet." +
+      "<p>Reconnect and reload.",
+    { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } },
+  );
+}
+
+/**
+ * Cache-first, with no runtime caching of misses — and never a rejection.
  *
  * Cache-first is safe because asset filenames carry a content hash: a stale
  * hit is impossible, since changed content means a changed name. And a miss
  * is by definition not part of the shell, so writing it into the cache
  * would grow it without bound and cache things this build never promised.
- * Misses fall through to the network untouched.
+ *
+ * The rejection part is the lesson. respondWith() given a promise that
+ * rejects fails the request outright — the browser shows a bare ERR_FAILED
+ * with no offline page and no explanation. The first version of this
+ * handler could reach that state: `hit ?? fetch(request)` with an empty
+ * cache and an unreachable network rejects, and because it happens on the
+ * navigation itself, the app becomes unopenable with no way in to repair
+ * it. A worker controlling an origin it cannot serve is worse than no
+ * worker at all, so every path below now ends in a Response, and a cache
+ * miss also triggers a refill rather than quietly depending on the network
+ * forever.
  */
 self.addEventListener("fetch", (event) => {
   const request = event.request;
@@ -101,10 +145,26 @@ self.addEventListener("fetch", (event) => {
 
   // A navigation to the directory, to index.html, or to any path under the
   // scope resolves to the one shell this app has.
-  if (request.mode === "navigate") {
-    event.respondWith(caches.match(SHELL, MATCH).then((hit) => hit ?? fetch(request)));
-    return;
-  }
+  const key = request.mode === "navigate" ? SHELL : request;
 
-  event.respondWith(caches.match(request, MATCH).then((hit) => hit ?? fetch(request)));
+  event.respondWith(
+    (async () => {
+      const hit = await caches.match(key, MATCH).catch(() => undefined);
+      if (hit) return hit;
+
+      // Missing something the build shipped means the cache is not what
+      // install left behind. Rebuild it in the background so the next
+      // visit works offline again instead of staying one outage away from
+      // being unopenable.
+      void refill();
+
+      try {
+        return await fetch(request);
+      } catch {
+        return request.mode === "navigate"
+          ? offlineShell()
+          : new Response("", { status: 504, statusText: "offline" });
+      }
+    })(),
+  );
 });
