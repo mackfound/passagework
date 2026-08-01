@@ -7,6 +7,15 @@ import { type Plugin, defineConfig } from "vite";
 const SW_SOURCE = "src/sw.js";
 
 /**
+ * In dist/ but not of it. Static hosts read these at deploy time as
+ * configuration and refuse to serve them — asking Cloudflare for /_headers
+ * gets a 404. Precaching one would fail, and because the install is a
+ * single atomic addAll, that one 404 takes every other file down with it
+ * and the app silently loses offline support altogether.
+ */
+const HOST_CONFIG = new Set(["_headers", "_redirects", "_routes.json"]);
+
+/**
  * Bake the shipped file list into dist/sw.js.
  *
  * A service worker can only precache filenames it knows, and Vite content-
@@ -38,7 +47,7 @@ function serviceWorker(): Plugin {
         .map((e) => relative(outDir, join(e.parentPath, e.name)).split(sep).join("/"))
         // Source maps are for debugging, not for running. A worker must
         // never precache itself: the browser manages that update check.
-        .filter((f) => !f.endsWith(".map") && f !== "sw.js")
+        .filter((f) => !f.endsWith(".map") && f !== "sw.js" && !HOST_CONFIG.has(f))
         .sort();
 
       // Version by *content*, not by filename. Vite hashes asset names, but

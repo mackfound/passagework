@@ -66,7 +66,8 @@ and re-importing it asks you to point at the recordings again.
 
 ### Use it in the browser
 
-> **Hosted at:** _(not published yet — fill this in on first deploy)_
+**[passagework.pages.dev](https://passagework.pages.dev)** — nothing to install, nothing to
+sign into. Point it at a recording on your machine and start marking passages.
 
 ### Or run it yourself
 

@@ -1,0 +1,31 @@
+# Cloudflare Pages reads this at deploy time and does not serve it as a
+# file. Vite copies public/ verbatim, so it lands at dist/_headers where
+# Pages expects it. Rules run general to specific; later matches win.
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+
+# The one rule that has to be here. A service worker is only replaced when
+# the browser sees different bytes at this URL, so a cached copy is a
+# deploy that quietly never arrives. no-cache still stores it — it just
+# forces a revalidation first, which is exactly the behaviour wanted.
+/sw.js
+  Cache-Control: no-cache
+
+# Unhashed, and it names which hashed bundle to load. Caching it hard
+# would pin the whole app to one build.
+/index.html
+  Cache-Control: no-cache
+
+# Content-hashed by Vite: the name changes whenever the bytes do, so these
+# can never go stale and never need revalidating.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Deliberately not immutable. These keep stable names across builds, so a
+# year-long cache would leave no way to replace one — and a stale font
+# served to the worker's precache would be baked into the offline copy
+# too. A day is cheap enough and stays correctable.
+/fonts/*
+  Cache-Control: public, max-age=86400
