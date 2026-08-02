@@ -1193,21 +1193,24 @@ body {
 
    The type clears at roughly half the rate of the ground it sits on. It
    does not beat the reveal outright — measured against these curves the
-   wordmark is still faintly there at 0.11 when the app is half up — but
-   it drops the worst moment, where both are visible at once, from about
-   0.49 to 0.30. Two sets of type at equal strength is the one artifact
-   here that would read as cheap instead of quick.
+   wordmark is still faintly there at 0.09 when the app is half up — but
+   it drops the worst moment, where both are visible at once, from 0.50
+   to 0.32. Two sets of type at equal strength is the one artifact here
+   that would read as cheap instead of quick.
+
+   Only the ratio between the two durations sets that figure, not their
+   length, so retiming the fade means scaling both.
 
    The reduced-motion rule at the top of this file drops both transitions,
    which puts the cut back. main.ts removes the element on a timer rather
    than transitionend so that stays true. */
 .overlay {
-  transition: opacity 180ms ease-out;
+  transition: opacity 220ms ease-out;
 }
 
 .overlay .wordmark,
 .overlay .hint {
-  transition: opacity 100ms ease-out;
+  transition: opacity 120ms ease-out;
 }
 
 .overlay.leaving,
