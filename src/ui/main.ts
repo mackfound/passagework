@@ -1513,6 +1513,15 @@ let armed = false;
 let armOverlay: HTMLElement | null = null;
 
 /**
+ * When the faded overlay leaves the DOM. This is a floor, not the length
+ * of the fade — that lives in style.css, where it can be read next to the
+ * rule it belongs to. The element is transparent and click-through long
+ * before this fires, so overshooting costs nothing, while undershooting
+ * would cut the dissolve off mid-way. Nothing has to be kept in step.
+ */
+const OVERLAY_REMOVE_MS = 400;
+
+/**
  * Dismiss the landing overlay and start the audio stack. Idempotent — the
  * click and keydown paths both land here.
  *
@@ -1525,10 +1534,34 @@ let armOverlay: HTMLElement | null = null;
 function armApp(): void {
   if (armed) return;
   armed = true;
-  armOverlay?.remove();
-  armOverlay = null;
+  // Paint first, dissolve second: the overlay is about to turn
+  // translucent, and what shows through it had better be the real app
+  // rather than whatever was underneath at boot.
   render();
+  dismissOverlay();
   void armAudio().then(() => render());
+}
+
+/**
+ * Cross-dissolve the landing overlay away, revealing the app beneath.
+ *
+ * Under prefers-reduced-motion the blanket rule at the top of style.css
+ * drops the transition, opacity snaps to zero, and this is the hard cut
+ * it always used to be — so there is no branch on it here. That only
+ * holds because nothing below waits on transitionend, which never fires
+ * when a transition is disabled or interrupted; an overlay left behind
+ * that way would be invisible, full-screen, and impossible to diagnose.
+ */
+function dismissOverlay(): void {
+  const overlay = armOverlay;
+  armOverlay = null;
+  if (!overlay) return;
+  // Immediately, not when the fade ends. The overlay stays on top for
+  // its whole exit, and a click landing on a ghost instead of the control
+  // underneath is a worse bargain than having no animation at all.
+  overlay.style.pointerEvents = "none";
+  overlay.classList.add("leaving");
+  window.setTimeout(() => overlay.remove(), OVERLAY_REMOVE_MS);
 }
 
 // ---------- rendering ----------
