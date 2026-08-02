@@ -1,0 +1,136 @@
+<!doctype html>
+<!--
+  Generates public/og.png, the social preview card.
+
+  Not part of the build. Open it through the dev server so the vendored
+  fonts resolve, then press the button:
+
+      npm run dev
+      http://localhost:5173/tools/og-card.html
+
+  It renders to a canvas rather than being drawn by hand, so the card
+  cannot drift from the app: same ground, same gold, same two faces, and
+  the mark comes from the constants in make-icons.mjs. Text is why this is
+  a browser page and not another Node script — tools/make-icons.mjs draws
+  circles and rectangles, which is all an icon needs, and typesetting
+  Cormorant would mean owning a font rasteriser to no purpose.
+
+  1200x630 is the 1.91:1 that LinkedIn, Facebook and Slack all crop to.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>og card</title>
+    <style>
+      @font-face {
+        font-family: "Cormorant Garamond";
+        src: url("/fonts/cormorant-garamond-latin.woff2") format("woff2");
+        font-weight: 300 700;
+      }
+      @font-face {
+        font-family: "Lora";
+        font-style: italic;
+        src: url("/fonts/lora-italic-latin.woff2") format("woff2");
+        font-weight: 400 700;
+      }
+      body {
+        background: #1c1a17;
+        color: #d7d3d3;
+        font-family: system-ui, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        padding: 24px;
+      }
+      canvas {
+        width: 600px;
+        height: 315px;
+        border: 1px solid #444;
+      }
+      button {
+        font: inherit;
+        padding: 8px 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="c" width="1200" height="630"></canvas>
+    <button id="save">download og.png</button>
+    <script>
+      const BG = "#141310";
+      const INK = "#e1ad66";
+      const FG = "#d7d3d3";
+      const DIM = "#9b9797";
+
+      // Same 32-unit geometry as tools/make-icons.mjs. No tile here: on a
+      // card that is already the app's ground it would be invisible.
+      const DOT = { cx: 7.7, r: 3.35, cy: [11.2, 20.8] };
+      const THIN = { x: 15.1, w: 3.1 };
+      const THICK = { x: 21.4, w: 6.3 };
+      const BAR = { y: 3.6, h: 24.8 };
+
+      function mark(ctx, cx, top, height) {
+        const s = height / BAR.h;
+        // The glyph spans x 4.35..27.65 in design units; centre on that.
+        const ox = cx - ((4.35 + 27.65) / 2) * s;
+        const oy = top - BAR.y * s;
+        ctx.fillStyle = INK;
+        for (const cy of DOT.cy) {
+          ctx.beginPath();
+          ctx.arc(ox + DOT.cx * s, oy + cy * s, DOT.r * s, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        for (const b of [THIN, THICK]) {
+          ctx.fillRect(ox + b.x * s, oy + BAR.y * s, b.w * s, BAR.h * s);
+        }
+      }
+
+      /**
+       * Canvas adds letter-spacing after the last glyph too, so centred
+       * tracked text sits half a space left of true. The app's CSS fixes
+       * this with text-indent; here it is measured and shifted back.
+       */
+      function tracked(ctx, text, cx, y, em) {
+        const pad = (parseFloat(em) * parseInt(ctx.font, 10)) / 2;
+        ctx.fillText(text, cx + pad, y);
+      }
+
+      function draw() {
+        const ctx = document.getElementById("c").getContext("2d");
+        ctx.fillStyle = BG;
+        ctx.fillRect(0, 0, 1200, 630);
+
+        mark(ctx, 600, 132, 112);
+
+        ctx.textAlign = "center";
+        ctx.fillStyle = FG;
+        ctx.letterSpacing = "0.26em";
+        ctx.font = "400 96px 'Cormorant Garamond', Georgia, serif";
+        tracked(ctx, "PASSAGEWORK", 600, 392, "0.26em");
+
+        ctx.letterSpacing = "0px";
+        ctx.fillStyle = DIM;
+        ctx.font = "italic 400 34px 'Lora', Georgia, serif";
+        ctx.fillText("Loop a short passage against its score, at any tempo,", 600, 476);
+        ctx.fillText("without letting go of your instrument.", 600, 526);
+
+        ctx.strokeStyle = "rgb(215 211 211 / 13%)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(430, 432.5);
+        ctx.lineTo(770, 432.5);
+        ctx.stroke();
+      }
+
+      document.fonts.ready.then(draw);
+
+      document.getElementById("save").onclick = () => {
+        const a = document.createElement("a");
+        a.download = "og.png";
+        a.href = document.getElementById("c").toDataURL("image/png");
+        a.click();
+      };
+    </script>
+  </body>
+</html>
