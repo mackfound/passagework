@@ -1513,13 +1513,20 @@ let armed = false;
 let armOverlay: HTMLElement | null = null;
 
 /**
- * When the faded overlay leaves the DOM. This is a floor, not the length
- * of the fade — that lives in style.css, where it can be read next to the
- * rule it belongs to. The element is transparent and click-through long
- * before this fires, so overshooting costs nothing, while undershooting
- * would cut the dissolve off mid-way. Nothing has to be kept in step.
+ * When the faded overlay leaves the DOM. A floor, not the length of the
+ * fade — that lives in style.css, next to the rule it belongs to, and the
+ * two do not have to be kept in step.
+ *
+ * The margin over it is deliberately wide. This timer keeps running while
+ * the main thread is busy, but the transition does not: armAudio is
+ * starting an AudioContext and decoding a recording in the same breath,
+ * and a jank spike there delays the dissolve without delaying this. Land
+ * inside the fade and the overlay is yanked away mid-dissolve, which
+ * reads as a pop — the exact thing the fade was added to remove. Sitting
+ * transparent and click-through for an extra moment costs nothing, so the
+ * asymmetry is all one way.
  */
-const OVERLAY_REMOVE_MS = 400;
+const OVERLAY_REMOVE_MS = 600;
 
 /**
  * Dismiss the landing overlay and start the audio stack. Idempotent — the
