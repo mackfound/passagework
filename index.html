@@ -43,14 +43,23 @@
     <meta property="og:site_name" content="Passagework" />
     <meta property="og:title" content="Passagework" />
     <!--
-      Kept at or above 100 characters: LinkedIn's Post Inspector warns
-      below that, and the tagline alone is 92. Same text as the meta
-      description above, deliberately — there is no reason for a crawler
-      and a search engine to be told different things.
+      Shorter than the meta description above, and deliberately so. That
+      one is read by search engines, which show about 160 characters; this
+      one is read by whatever renders a link preview, where a single line
+      is the whole budget. LinkedIn's own card does not print it at all —
+      image, title, domain, nothing else — so it is really working for
+      Slack, Discord and iMessage.
+
+      Post Inspector warns about descriptions under 100 characters. That
+      is advice about search copy, not a rule about cards, and it is not
+      worth padding a preview line to satisfy.
+
+      The card image already carries the full tagline, so repeating every
+      word of it here would only say the same thing twice.
     -->
     <meta
       property="og:description"
-      content="Loop a short passage against its score, at any tempo, without letting go of your instrument. No account, no upload — your recordings never leave your machine."
+      content="Loop a short passage against its score, at any tempo, hands-free."
     />
     <meta property="og:url" content="https://passagework.pages.dev/" />
     <meta property="og:image" content="https://passagework.pages.dev/og.png" />
