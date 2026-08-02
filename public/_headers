@@ -24,8 +24,20 @@
   Cache-Control: public, max-age=31536000, immutable
 
 # Deliberately not immutable. These keep stable names across builds, so a
-# year-long cache would leave no way to replace one — and a stale font
-# served to the worker's precache would be baked into the offline copy
-# too. A day is cheap enough and stays correctable.
+# year-long cache would leave no way to replace one. A day is cheap enough
+# and stays correctable.
 /fonts/*
+  Cache-Control: public, max-age=86400
+
+# Same bargain as the fonts: unhashed, stable names, so a long cache would
+# make the mark unreplaceable. Browsers also request /favicon.ico without
+# being asked to, and this host answers anything unmatched with index.html
+# and a 200 — so the file has to exist for that request to mean anything.
+/favicon.ico
+  Cache-Control: public, max-age=86400
+
+/favicon.svg
+  Cache-Control: public, max-age=86400
+
+/apple-touch-icon.png
   Cache-Control: public, max-age=86400
