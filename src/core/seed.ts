@@ -16,7 +16,10 @@ export function makeSeedProject(): ProjectDoc {
   return {
     schemaVersion: CURRENT_VERSION,
     id: "prj_default",
-    name: "Fall 2026 Auditions",
+    // Neutral on purpose. This is the first thing a new user sees, and
+    // naming it after one person's audition season both dates the app and
+    // describes work that isn't theirs. Renaming is one click away.
+    name: "Untitled",
     sources: [
       {
         // label stays empty until a file is linked: it always holds the
