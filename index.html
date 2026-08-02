@@ -26,16 +26,25 @@
     />
 
     <!--
+      The old pages.dev address still serves this same build and always
+      will, so without this there are two live URLs for one page. This
+      names which one is the site. Crawlers follow it: a link shared as
+      pages.dev resolves to the card below rather than a second identity.
+    -->
+    <link rel="canonical" href="https://passagework.us/" />
+
+    <!--
       Link previews. These have to be static: the crawlers that build a
       preview card do not run JavaScript, so nothing the app sets at
       runtime is ever seen. Without them a shared link unfurls to a bare
       rectangle holding one word.
 
-      og:url and og:image are the only absolute URLs in the project, and
-      they have to be — the spec requires it and crawlers do not resolve
-      relative ones reliably. So this is the one file that knows where the
-      app is deployed, and moving to another domain means editing these
-      two lines. Everything else stays relative (see vite.config.ts).
+      The canonical above and og:url/og:image below are the only absolute
+      URLs in the project, and they have to be — the spec requires it and
+      crawlers do not resolve relative ones reliably. So this is the one
+      file that knows where the app is deployed, and moving again means
+      editing these three lines. Everything else stays relative (see
+      vite.config.ts).
 
       The card itself is public/og.png, drawn by tools/og-card.html.
     -->
@@ -61,8 +70,8 @@
       property="og:description"
       content="Loop a short passage against its score, at any tempo, hands-free."
     />
-    <meta property="og:url" content="https://passagework.pages.dev/" />
-    <meta property="og:image" content="https://passagework.pages.dev/og.png" />
+    <meta property="og:url" content="https://passagework.us/" />
+    <meta property="og:image" content="https://passagework.us/og.png" />
     <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />

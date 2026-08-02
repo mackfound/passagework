@@ -69,7 +69,7 @@ recordings again.
 
 ### Use it in the browser
 
-**[passagework.pages.dev](https://passagework.pages.dev)** — nothing to install, nothing to
+**[passagework.us](https://passagework.us)** — nothing to install, nothing to
 sign into. Point it at a recording on your machine and start marking passages. The opening
 screen waits for a keypress — browsers only start audio from a real gesture — and then
 dissolves into the app, or cuts straight in under `prefers-reduced-motion`.
